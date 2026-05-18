@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+.dvc/cache
+.dvc/tmp
+data/
+mlruns/
+.mypy_cache/
+.ruff_cache/

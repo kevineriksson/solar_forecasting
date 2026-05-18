@@ -1,0 +1,152 @@
+# params.yaml
+# Single source of truth for all pipeline parameters.
+# Every script under src/ reads from here. Do not hardcode values elsewhere.
+
+# ---------------------------------------------------------------------------
+# Site (fixed for this project)
+# ---------------------------------------------------------------------------
+site:
+  name: montana_wolfpoint
+  latitude: 48.30783
+  longitude: -105.1017
+  altitude_m: 640        # approximate; refine from Solcast metadata if available
+  timezone: UTC          # storage timezone — all timestamps in UTC end-to-end
+  panel:
+    tilt_deg: 46.59      # ≈ latitude tilt
+    azimuth_deg: 180     # due south
+
+# ---------------------------------------------------------------------------
+# Raw data assumptions
+# ---------------------------------------------------------------------------
+data:
+  resolution_minutes: 15
+  steps_per_hour: 4
+  steps_per_day: 96
+
+  # Solcast column name mapping. Override here if your file uses different
+  # column names. Stage 1 ingestion renames them to these canonical names.
+  raw_columns:
+    timestamp: period_end       # Solcast default; UTC, period-ending
+    ghi: ghi
+    dni: dni
+    dhi: dhi
+    gti: gti
+    air_temp: air_temp
+    wind_speed_10m: wind_speed_10m
+    zenith: zenith
+    azimuth: azimuth
+
+  raw_file_path: data/raw/solcast_wolfpoint.csv
+
+# ---------------------------------------------------------------------------
+# Forecast definition
+# ---------------------------------------------------------------------------
+forecast:
+  targets: [ghi, dni, dhi]      # all direct outputs — NOT derived from GHI
+  horizons_steps: [1, 4]        # 1 step = 15 min, 4 steps = 1 hour
+  horizon_labels: ["15min", "1h"]
+  n_outputs: 6                  # 3 targets × 2 horizons
+
+# ---------------------------------------------------------------------------
+# Splits — defined by timestamp relative to reference_now, NOT datetime.now()
+# ---------------------------------------------------------------------------
+splits:
+  # Set this to the latest timestamp present in your raw Solcast file (UTC).
+  # Everything else is defined relative to it. Update when re-downloading data.
+  reference_now: "2026-05-10T00:00:00Z"
+
+  # Months back from reference_now defining each window boundary.
+  # train  : oldest record  -> reference_now - 8 months
+  # promo  : reference_now - 8 months -> reference_now - 6 months
+  # replay : reference_now - 6 months -> reference_now
+  promo_months_back_end: 6      # promo window ends 6 months before reference_now
+  promo_months_back_start: 8    # promo window starts 8 months before reference_now
+  replay_months: 6              # replay window = most recent 6 months
+
+# ---------------------------------------------------------------------------
+# Feature engineering (Stage 2)
+# ---------------------------------------------------------------------------
+features:
+  lags_steps: [1, 4, 12]        # 15 min, 1 h, 3 h
+  rolling_means_steps: [4, 12]  # 1 h, 3 h
+  kt_clip_min: 0.0
+  kt_clip_max: 1.5
+  night_zenith_threshold_deg: 90.0
+  # Variables to compute lags + rolling means for. k_t is added by the pipeline.
+  lagged_variables: [ghi, dni, dhi, k_t, air_temp, wind_speed_10m]
+
+# ---------------------------------------------------------------------------
+# Training (Stage 3)
+# ---------------------------------------------------------------------------
+training:
+  cv:
+    scheme: rolling_origin
+    n_splits: 5
+    test_size_steps: 2880       # 30 days of 15-min steps
+    gap_steps: 4                # 1-hour gap between train end and val start
+
+  persistence:
+    # Smart persistence on k_t for GHI; on clear-sky-indexed versions for DNI/DHI.
+    enabled: true
+
+  xgboost:
+    n_estimators: 500
+    max_depth: 6
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+    early_stopping_rounds: 25
+    # Per-target, per-horizon models (6 total) — alternative: MultiOutputRegressor wrapper
+    strategy: per_output
+
+  lstm:
+    sequence_length_steps: 24   # 6 hours of history
+    hidden_size: 64
+    num_layers: 2
+    dropout: 0.2
+    batch_size: 256
+    learning_rate: 1.0e-3
+    epochs: 30
+    early_stopping_patience: 5
+
+# ---------------------------------------------------------------------------
+# Promotion (Stage 4)
+# ---------------------------------------------------------------------------
+promotion:
+  metric: skill_score           # 1 - RMSE_model / RMSE_persistence
+  aggregation: mean             # average across 6 outputs
+  margin: 0.02                  # candidate must beat Production by this much
+
+# ---------------------------------------------------------------------------
+# Serving (Stage 5)
+# ---------------------------------------------------------------------------
+serving:
+  model_name: solar_forecaster
+  model_stage: Production
+  port: 8000
+  replicas: 1
+
+# ---------------------------------------------------------------------------
+# Replay + monitoring (Stage 6)
+# ---------------------------------------------------------------------------
+replay:
+  speedup_rps: 500              # requests per second; ~2 min for 6 months
+  emit_residuals: true
+
+monitoring:
+  drift:
+    metric: psi                 # population stability index
+    window_steps: 96            # last 24 h of replay traffic
+    threshold: 0.2              # PSI > 0.2 considered drift
+    sustained_minutes: 10       # must hold for this long before alerting
+  skill_alert:
+    threshold: 0.0              # rolling skill drops below this -> alert
+    sustained_minutes: 10
+
+# ---------------------------------------------------------------------------
+# Storage paths (relative; resolved to MinIO via DVC)
+# ---------------------------------------------------------------------------
+paths:
+  interim: data/interim
+  features: data/features
+  splits_manifest: data/interim/splits.json
