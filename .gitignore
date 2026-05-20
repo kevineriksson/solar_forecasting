@@ -8,3 +8,4 @@ data/
 mlruns/
 .mypy_cache/
 .ruff_cache/
+PROMPTS.md
