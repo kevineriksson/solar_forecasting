@@ -11,3 +11,22 @@ stages:
     outs:
       - data/interim/parquet
       - data/interim/splits.json
+
+  features:
+    cmd: python -m src.features.main --params params.yaml
+    deps:
+      - src/features
+      - src/ingest/splits.py
+      - src/ingest/schema.py
+      - data/interim/parquet
+      - data/interim/splits.json
+    params:
+      - site
+      - features
+      - splits
+      - paths
+    outs:
+      - data/features/train.parquet
+      - data/features/promo.parquet
+      - data/features/replay.parquet
+      - data/features/features_manifest.json

@@ -48,3 +48,83 @@ stages:
       hash: md5
       md5: 88d7007baadb7790f5fedd3e9b8ff0bb
       size: 585
+  features:
+    cmd: python -m src.features.main --params params.yaml
+    deps:
+    - path: data/interim/parquet
+      hash: md5
+      md5: 2b29d2bb4b2192b445bb1006fbca0e09.dir
+      size: 13805999
+      nfiles: 233
+    - path: data/interim/splits.json
+      hash: md5
+      md5: 88d7007baadb7790f5fedd3e9b8ff0bb
+      size: 585
+    - path: src/features
+      hash: md5
+      md5: 52ed806abce8de01372c311bced58b42.dir
+      size: 37729
+      nfiles: 13
+    - path: src/ingest/schema.py
+      hash: md5
+      md5: 82581dcc130f8394db0100f097d972c3
+      size: 4611
+    - path: src/ingest/splits.py
+      hash: md5
+      md5: f50dc032ad6ad6057c12afc0df512c7d
+      size: 5224
+    params:
+      params.yaml:
+        features:
+          lags_steps:
+          - 1
+          - 4
+          - 12
+          rolling_means_steps:
+          - 4
+          - 12
+          kt_clip_min: 0.0
+          kt_clip_max: 1.5
+          night_zenith_threshold_deg: 90.0
+          lagged_variables:
+          - ghi
+          - dni
+          - dhi
+          - k_t
+          - air_temp
+          - wind_speed_100m
+        paths:
+          interim: data/interim
+          features: data/features
+          splits_manifest: data/interim/splits.json
+        site:
+          name: montana_wolfpoint
+          latitude: 48.30783
+          longitude: -105.1017
+          altitude_m: 640
+          timezone: UTC
+          panel:
+            tilt_deg: 46.59
+            azimuth_deg: 180
+        splits:
+          reference_now: '2026-05-10T00:00:00Z'
+          promo_months_back_end: 6
+          promo_months_back_start: 8
+          replay_months: 6
+    outs:
+    - path: data/features/features_manifest.json
+      hash: md5
+      md5: 62a25a91fc141f0c122a7ab51dd0de8f
+      size: 1101
+    - path: data/features/promo.parquet
+      hash: md5
+      md5: 4d7095a3879e449aefe3cfad205e8b74
+      size: 554577
+    - path: data/features/replay.parquet
+      hash: md5
+      md5: 7d2478f2b41d1f710a660d790e3962c0
+      size: 1401050
+    - path: data/features/train.parquet
+      hash: md5
+      md5: f2f1851be19d97b8a20876ba1d96ce87
+      size: 54316620
