@@ -32,11 +32,11 @@ data:
     dhi: dhi
     gti: gti
     air_temp: air_temp
-    wind_speed_10m: wind_speed_10m
+    wind_speed_100m: wind_speed_100m   # file ships 100 m AGL wind, not 10 m
     zenith: zenith
     azimuth: azimuth
 
-  raw_file_path: data/raw/solcast_wolfpoint.csv
+  raw_file_path: data/raw/solcast.csv
 
 # ---------------------------------------------------------------------------
 # Forecast definition
@@ -73,7 +73,7 @@ features:
   kt_clip_max: 1.5
   night_zenith_threshold_deg: 90.0
   # Variables to compute lags + rolling means for. k_t is added by the pipeline.
-  lagged_variables: [ghi, dni, dhi, k_t, air_temp, wind_speed_10m]
+  lagged_variables: [ghi, dni, dhi, k_t, air_temp, wind_speed_100m]
 
 # ---------------------------------------------------------------------------
 # Training (Stage 3)

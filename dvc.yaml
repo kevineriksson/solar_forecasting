@@ -1,0 +1,13 @@
+stages:
+  ingest:
+    cmd: python -m src.ingest.main --params params.yaml
+    deps:
+      - src/ingest
+      - data/raw/solcast.csv
+    params:
+      - data
+      - splits
+      - paths
+    outs:
+      - data/interim/parquet
+      - data/interim/splits.json

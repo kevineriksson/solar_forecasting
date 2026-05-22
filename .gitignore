@@ -4,8 +4,14 @@ __pycache__/
 .venv/
 .dvc/cache
 .dvc/tmp
-data/
 mlruns/
 .mypy_cache/
 .ruff_cache/
 PROMPTS.md
+
+# Ignore data file contents; track DVC pointer + auto-managed .gitignore files.
+# (Re-include directories first so per-file re-includes can take effect.)
+data/**
+!data/**/
+!data/**/.gitignore
+!data/**/*.dvc

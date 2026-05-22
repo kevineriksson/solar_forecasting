@@ -1,0 +1,5 @@
+outs:
+- md5: 6754fb7238f5665fdbc76a3787a58753
+  size: 38942566
+  hash: md5
+  path: solcast.csv

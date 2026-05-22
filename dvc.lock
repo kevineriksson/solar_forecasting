@@ -1,0 +1,50 @@
+schema: '2.0'
+stages:
+  ingest:
+    cmd: python -m src.ingest.main --params params.yaml
+    deps:
+    - path: data/raw/solcast.csv
+      hash: md5
+      md5: 6754fb7238f5665fdbc76a3787a58753
+      size: 38942566
+    - path: src/ingest
+      hash: md5
+      md5: e4e1e32d79f068184ddeee74aebe8fab.dir
+      size: 38373
+      nfiles: 11
+    params:
+      params.yaml:
+        data:
+          resolution_minutes: 15
+          steps_per_hour: 4
+          steps_per_day: 96
+          raw_columns:
+            timestamp: period_end
+            ghi: ghi
+            dni: dni
+            dhi: dhi
+            gti: gti
+            air_temp: air_temp
+            wind_speed_100m: wind_speed_100m
+            zenith: zenith
+            azimuth: azimuth
+          raw_file_path: data/raw/solcast.csv
+        paths:
+          interim: data/interim
+          features: data/features
+          splits_manifest: data/interim/splits.json
+        splits:
+          reference_now: '2026-05-10T00:00:00Z'
+          promo_months_back_end: 6
+          promo_months_back_start: 8
+          replay_months: 6
+    outs:
+    - path: data/interim/parquet
+      hash: md5
+      md5: 2b29d2bb4b2192b445bb1006fbca0e09.dir
+      size: 13805999
+      nfiles: 233
+    - path: data/interim/splits.json
+      hash: md5
+      md5: 88d7007baadb7790f5fedd3e9b8ff0bb
+      size: 585
