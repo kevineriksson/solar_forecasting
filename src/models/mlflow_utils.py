@@ -28,7 +28,15 @@ def resolve_tracking_uri() -> str:
 
 
 def get_git_commit(repo_root: Path) -> str:
-    """Return `git rev-parse HEAD` for the repo. Raise if not a git repo or empty."""
+    """Return `git rev-parse HEAD` for the repo. Raise if not a git repo or empty.
+
+    If `GIT_COMMIT_OVERRIDE` is set in the environment, use it verbatim. This is
+    how KFP components (which don't have a working .git directory) supply the
+    commit they were submitted with.
+    """
+    override = os.environ.get("GIT_COMMIT_OVERRIDE", "").strip()
+    if override:
+        return override
     try:
         out = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -51,7 +59,14 @@ def get_dvc_features_hash(repo_root: Path) -> str:
     Pulls the `features` stage's `outs[].md5` values from `dvc.lock`,
     concatenates them in sorted-path order, and returns their sha256 hex digest.
     This binds an MLflow run to the precise feature Parquet files it consumed.
+
+    If `DVC_HASH_OVERRIDE` is set in the environment, use it verbatim. KFP
+    components ship without `dvc.lock` and rely on the submit-time hash being
+    passed in.
     """
+    override = os.environ.get("DVC_HASH_OVERRIDE", "").strip()
+    if override:
+        return override
     lock_path = repo_root / "dvc.lock"
     if not lock_path.exists():
         raise RuntimeError(f"dvc.lock not found at {lock_path}")
