@@ -9,8 +9,8 @@ each component just needs:
   2. The git_commit + dvc_hash exported as env vars so
      `src.models.mlflow_utils` tags every MLflow run correctly without needing
      a working git / dvc CLI inside the pod.
-  3. A `params.yaml` to point everything at — we mount the cluster ConfigMap
-     `solar-params` at /workspace/params.yaml (see pipeline.py).
+  3. The image-baked `params.yaml` at `/app/params.yaml` (kept in sync because
+     we rebuild the image at each git_sha).
 
 The component functions themselves take no inputs: pipeline-level
 `git_sha` / `dvc_hash` are injected into each pod as env vars by
@@ -27,8 +27,13 @@ from collections.abc import Callable
 
 from kfp import dsl
 
-# Where the ConfigMap holding params.yaml is mounted inside each pod.
-PARAMS_MOUNT_PATH = "/workspace/params.yaml"
+# params.yaml is baked into the image at /app/params.yaml (see
+# docker/train.Dockerfile). The training scripts use Path(args.params).resolve()
+# to derive repo_root, so the file MUST sit at /app/ — a ConfigMap volume mount
+# resolves through a `..data` symlink and breaks that assumption. Since we
+# rebuild the image at every git_sha anyway, the baked params.yaml is the
+# source of truth.
+PARAMS_PATH = "/app/params.yaml"
 
 # Wrap module invocations with a feature-fetch step. The training scripts
 # expect `data/features/*.parquet` relative to repo root (`/app`).
@@ -61,7 +66,7 @@ def _make_training_op(name: str, module: str, image: str) -> Callable:
         return dsl.ContainerSpec(
             image=image,
             command=["bash", "-c"],
-            args=[_TRAIN_WRAPPER.format(module=module, params=PARAMS_MOUNT_PATH)],
+            args=[_TRAIN_WRAPPER.format(module=module, params=PARAMS_PATH)],
         )
 
     op.__name__ = name

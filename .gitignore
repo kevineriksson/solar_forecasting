@@ -15,3 +15,6 @@ data/**
 !data/**/
 !data/**/.gitignore
 !data/**/*.dvc
+
+# Local Claude Code session state
+.claude/

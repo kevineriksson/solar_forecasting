@@ -59,7 +59,15 @@ helm upgrade --install mlflow community-charts/mlflow -n mlflow \
   --set artifactRoot.s3.awsSecretAccessKey="$MINIO_ROOT_PASSWORD" \
   --set extraEnvVars.MLFLOW_S3_ENDPOINT_URL=http://minio.minio.svc.cluster.local:9000 \
   --set extraEnvVars.AWS_DEFAULT_REGION=us-east-1 \
+  --set 'extraEnvVars.MLFLOW_SERVER_ALLOWED_HOSTS=*' \
   --set service.type=ClusterIP
+
+# MLflow 3.x ships DNS-rebinding protection that rejects any Host header outside
+# its localhost/private-IP allow list. The cluster DNS name
+# (mlflow.mlflow.svc.cluster.local) is not on that list, so every in-cluster
+# client (KFP pipeline pods, FastAPI serving) would otherwise get HTTP 403:
+# "Invalid Host header - possible DNS rebinding attack detected". Setting
+# MLFLOW_SERVER_ALLOWED_HOSTS=* above whitelists all hostnames.
 
 echo "    Waiting for MLflow to be ready..."
 kubectl rollout status -n mlflow deployment/mlflow --timeout=600s

@@ -6,7 +6,8 @@ DAG:
                                 └─► train_lstm        ─┘
 
 All six pods run the same `solar-train:<git_sha>` image. Each pod:
-  • mounts the cluster-wide `solar-params` ConfigMap at /workspace/params.yaml
+  • uses the image-baked `params.yaml` at `/app/params.yaml` — kept in sync
+    with the running git_sha by virtue of being rebuilt at the same sha
   • reads MinIO + MLflow creds from the `solar-mlops-creds` Secret
   • exports the pipeline-level git_sha / dvc_hash via GIT_COMMIT_OVERRIDE
     and DVC_HASH_OVERRIDE so src.models.mlflow_utils tags runs correctly
@@ -22,10 +23,9 @@ from collections.abc import Callable
 
 from kfp import dsl, kubernetes
 
-from .components import PARAMS_MOUNT_PATH, build_ops
+from .components import build_ops
 
 SECRET_NAME = "solar-mlops-creds"
-CONFIGMAP_NAME = "solar-params"
 
 # Keys we copy from the Secret straight into the pod environment.
 _SECRET_ENV_KEYS = {
@@ -37,7 +37,7 @@ _SECRET_ENV_KEYS = {
 
 
 def _attach_runtime(task: dsl.PipelineTask, git_sha: str, dvc_hash: str) -> dsl.PipelineTask:
-    """Inject Secret + ConfigMap + override env vars onto a task.
+    """Inject Secret + override env vars onto a task.
 
     `git_sha` and `dvc_hash` are plain Python strings (compile-time constants),
     not pipeline parameters: KFP's `set_env_variable` rejects parameter
@@ -45,11 +45,6 @@ def _attach_runtime(task: dsl.PipelineTask, git_sha: str, dvc_hash: str) -> dsl.
     per submission keeps the run reproducible while satisfying that limit.
     """
     kubernetes.use_secret_as_env(task, secret_name=SECRET_NAME, secret_key_to_env=_SECRET_ENV_KEYS)
-    kubernetes.use_config_map_as_volume(
-        task,
-        config_map_name=CONFIGMAP_NAME,
-        mount_path="/workspace",
-    )
     task.set_env_variable("GIT_COMMIT_OVERRIDE", git_sha)
     task.set_env_variable("DVC_HASH_OVERRIDE", dvc_hash)
     # Image is built locally and `minikube image load`-ed; never tries a pull.
@@ -102,4 +97,4 @@ def build_pipeline(image: str, git_sha: str, dvc_hash: str) -> Callable:
     return solar_pipeline
 
 
-__all__ = ["build_pipeline", "PARAMS_MOUNT_PATH", "SECRET_NAME", "CONFIGMAP_NAME"]
+__all__ = ["build_pipeline", "SECRET_NAME"]

@@ -6,26 +6,15 @@ Manifests the Kubeflow pipeline pods need at runtime:
 |---------------|---------------------------------------------------------------------|
 | `secret.yaml` | `solar-mlops-creds` — MinIO + MLflow endpoints and credentials.     |
 
-The `solar-params` ConfigMap (holding `params.yaml`) is generated at submit
-time from the live file on disk:
+The `params.yaml` consumed by the trainers is baked into the `solar-train`
+image at `/app/params.yaml` (see `docker/train.Dockerfile`). The image is
+rebuilt at each git_sha, so the baked file always matches the running
+pipeline — no cluster-side override needed.
 
-```bash
-kubectl -n kubeflow create configmap solar-params \
-  --from-file=params.yaml=./params.yaml \
-  --dry-run=client -o yaml | kubectl apply -f -
-```
-
-This is intentionally not a checked-in manifest — `params.yaml` changes more
-often than the image, and baking it into the cluster from the working tree
-keeps the two in sync without an extra commit step.
-
-## Apply order
+## Apply
 
 ```bash
 kubectl apply -f k8s/pipelines/secret.yaml
-kubectl -n kubeflow create configmap solar-params \
-  --from-file=params.yaml=./params.yaml \
-  --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Both are namespace-scoped to `kubeflow` (where KFP launches run pods).
+Namespace-scoped to `kubeflow` (where KFP launches run pods).

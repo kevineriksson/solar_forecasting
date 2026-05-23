@@ -52,11 +52,8 @@ SHA_SHORT=$(git rev-parse --short HEAD)
 docker build -f docker/train.Dockerfile -t solar-train:$SHA_SHORT .
 minikube image load solar-train:$SHA_SHORT  -p solar-mlops
 
-# 3. Apply cluster prerequisites (Secret + params ConfigMap).
+# 3. Apply cluster prerequisites (just the MinIO + MLflow Secret).
 kubectl apply -f k8s/pipelines/secret.yaml
-kubectl -n kubeflow create configmap solar-params \
-  --from-file=params.yaml=./params.yaml \
-  --dry-run=client -o yaml | kubectl apply -f -
 
 # 4. Port-forward MinIO and publish the feature parquets for this sha.
 kubectl port-forward -n minio svc/minio 9000:9000 &
