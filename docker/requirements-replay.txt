@@ -1,0 +1,11 @@
+# Pinned dependencies for the replay image (T7). Kept minimal.
+# Rebuilds the feature vector exactly as Stage 2 would (hence pvlib), POSTs to
+# the serving endpoint, and emits residual metrics via prometheus_client.
+numpy==1.26.4
+pandas==2.2.3
+pyarrow==17.0.0
+PyYAML==6.0.2
+python-dateutil==2.9.0.post0
+pvlib==0.11.0
+requests==2.32.3
+prometheus-client==0.21.1
