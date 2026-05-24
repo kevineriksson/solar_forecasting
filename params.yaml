@@ -81,7 +81,7 @@ features:
 training:
   cv:
     scheme: rolling_origin
-    n_splits: 5
+    n_splits: 3                 # fewer folds — keeps the pipeline tractable on a laptop
     test_size_steps: 2880       # 30 days of 15-min steps
     gap_steps: 4                # 1-hour gap between train end and val start
 
@@ -102,12 +102,17 @@ training:
   lstm:
     sequence_length_steps: 24   # 6 hours of history
     hidden_size: 64
-    num_layers: 2
+    num_layers: 1               # MLOps pipeline demo — accuracy is secondary
     dropout: 0.2
     batch_size: 256
     learning_rate: 1.0e-3
-    epochs: 30
-    early_stopping_patience: 5
+    epochs: 15
+    early_stopping_patience: 3
+    # Train LSTM on the last N years of train.parquet only. The full ~18-year
+    # train split is overkill for an LSTM on CPU; 3 years still covers full
+    # seasonal cycles and converges fast. persistence + xgboost remain on the
+    # full train split.
+    train_subsample_years: 3
 
 # ---------------------------------------------------------------------------
 # Promotion (Stage 4)

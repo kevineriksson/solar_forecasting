@@ -86,10 +86,28 @@ def main(argv: list[str] | None = None) -> int:
 
     train_path = repo_root / params["paths"]["features"] / "train.parquet"
     LOG.info("loading train features: %s", train_path)
-    df = pd.read_parquet(train_path)
-    df[TIMESTAMP_COL] = pd.to_datetime(df[TIMESTAMP_COL], utc=True)
-    df = df.sort_values(TIMESTAMP_COL).reset_index(drop=True)
-    LOG.info("train rows=%d cols=%d", len(df), df.shape[1])
+    df_full = pd.read_parquet(train_path)
+    df_full[TIMESTAMP_COL] = pd.to_datetime(df_full[TIMESTAMP_COL], utc=True)
+    df_full = df_full.sort_values(TIMESTAMP_COL).reset_index(drop=True)
+    LOG.info("train rows (full)=%d cols=%d", len(df_full), df_full.shape[1])
+
+    # Optionally subsample LSTM training to the last N years of the train split.
+    # The full ~18-year history is overkill for a CPU LSTM in this project;
+    # persistence + xgboost still see the full train split. We slice by
+    # timestamp so the chronological CV inside lstm_train remains valid on
+    # the reduced frame.
+    subsample_years = lstm_cfg.get("train_subsample_years")
+    if subsample_years is not None and int(subsample_years) > 0:
+        cutoff = df_full[TIMESTAMP_COL].iloc[-1] - pd.Timedelta(days=365 * int(subsample_years))
+        df = df_full[df_full[TIMESTAMP_COL] >= cutoff].reset_index(drop=True)
+        LOG.info(
+            "LSTM train subsample: last %s year(s) -> rows=%d  cutoff=%s",
+            subsample_years,
+            len(df),
+            cutoff.isoformat().replace("+00:00", "Z"),
+        )
+    else:
+        df = df_full
 
     feature_cols = [c for c in df.columns if c not in EXCLUDED_FEATURE_COLS]
     LOG.info("using %d feature columns", len(feature_cols))
@@ -193,6 +211,11 @@ def main(argv: list[str] | None = None) -> int:
                 "param_sequence_length_default": int(lstm_cfg["sequence_length_steps"]),
                 "param_hidden_size_default": int(lstm_cfg["hidden_size"]),
                 "param_epochs_default": int(lstm_cfg["epochs"]),
+                "train_subsample_years": (
+                    int(subsample_years) if subsample_years is not None else 0
+                ),
+                "n_rows_train_full": len(df_full),
+                "n_rows_train_used": len(df),
             }
         )
 
