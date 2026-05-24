@@ -9,6 +9,9 @@ mlruns/
 .ruff_cache/
 PROMPTS.md
 
+# Rendered manifests and scratch output from `make` (T14).
+build/
+
 # Ignore data file contents; track DVC pointer + auto-managed .gitignore files.
 # (Re-include directories first so per-file re-includes can take effect.)
 data/**

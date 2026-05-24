@@ -7,7 +7,7 @@ set -euo pipefail
 
 PROFILE="${MINIKUBE_PROFILE:-solar-mlops}"
 CPUS="${MINIKUBE_CPUS:-6}"
-MEM_MB="${MINIKUBE_MEM_MB:-7200}"
+MEM_MB="${MINIKUBE_MEM_MB:-12288}"   # 12 GB — needed for parallel xgb+lstm training under the T8 DAG
 DISK="${MINIKUBE_DISK:-60g}"
 K8S_VERSION="${K8S_VERSION:-v1.29.0}"
 
