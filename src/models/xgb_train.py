@@ -129,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
     per_fold_train_rmse: dict[tuple[int, str, str], float] = {}
     per_fold_best_iter: dict[tuple[int, str, str], int] = {}
     feature_importances_last: dict[tuple[str, str], dict[str, float]] = {}
+    # Last-fold models per (target, horizon_label) — used for T9 promo scoring.
+    last_fold_models: dict[tuple[str, str], XGBRegressor] = {}
 
     with mlflow.start_run(run_name=RUN_NAME) as run:
         mlflow.set_tags(tags)
@@ -247,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
                         feature_importances_last[(t, lbl)] = {
                             feature_cols[i]: float(imp[i]) for i in range(len(feature_cols))
                         }
+                        last_fold_models[(t, lbl)] = model
 
         # Aggregate per-cell across folds (mean).
         agg_rmse: dict[tuple[str, str], float] = {}
@@ -265,6 +268,59 @@ def main(argv: list[str] | None = None) -> int:
 
         mean_skill = float(np.mean(list(agg_skill.values())))
         mlflow.log_metric("mean.skill", mean_skill)
+
+        # --- T9: score the last-fold models on the promotion validation window. ---
+        # Skill denominator: persistence's `promo.rmse.*` from its own run.
+        persistence_promo_rmse = _load_persistence_promo_rmse(
+            persistence_ref.run_id, targets, horizon_labels
+        )
+        promo_path = repo_root / params["paths"]["features"] / "promo.parquet"
+        LOG.info("loading promo features for promotion-window scoring: %s", promo_path)
+        promo_df = pd.read_parquet(promo_path)
+        promo_df[TIMESTAMP_COL] = pd.to_datetime(promo_df[TIMESTAMP_COL], utc=True)
+        promo_df = promo_df.sort_values(TIMESTAMP_COL).reset_index(drop=True)
+
+        # Stitch train tail (max_h rows) onto promo so X.shift(h) has valid
+        # history for the first h rows of promo. Slice off after predict.
+        max_h = max(horizons)
+        promo_with_history = pd.concat([df.tail(max_h), promo_df], axis=0, ignore_index=True)
+        promo_X_full = promo_with_history[feature_cols]
+        promo_X_shifted: dict[int, pd.DataFrame] = {
+            h: promo_X_full.shift(h).reset_index(drop=True) for h in horizons
+        }
+
+        promo_skills: list[float] = []
+        for t in targets:
+            y_true = promo_df[t].astype("float64").to_numpy()
+            for h, lbl in zip(horizons, horizon_labels, strict=True):
+                model = last_fold_models[(t, lbl)]
+                X_pred = promo_X_shifted[h].iloc[max_h:].reset_index(drop=True)
+                y_pred = model.predict(X_pred)
+                diff = y_pred - y_true
+                p_rmse = float(np.sqrt(np.mean(diff**2)))
+                p_mae = float(np.mean(np.abs(diff)))
+                baseline = persistence_promo_rmse[(t, lbl)]
+                p_skill = skill_score(p_rmse, baseline)
+                mlflow.log_metric(f"promo.rmse.{t}.{lbl}", p_rmse)
+                mlflow.log_metric(f"promo.mae.{t}.{lbl}", p_mae)
+                mlflow.log_metric(f"promo.skill.{t}.{lbl}", p_skill)
+                promo_skills.append(p_skill)
+                LOG.info(
+                    "  promo  %s %s  RMSE=%.3f  baseline=%.3f  skill=%+.4f",
+                    t,
+                    lbl,
+                    p_rmse,
+                    baseline,
+                    p_skill,
+                )
+        promo_mean_skill = float(np.mean(promo_skills))
+        mlflow.log_metric("promo.mean_skill", promo_mean_skill)
+        LOG.info("promo mean_skill across 6 outputs: %+.4f", promo_mean_skill)
+
+        mlflow.log_param("train_window_start", _iso_ts(df[TIMESTAMP_COL].iloc[0]))
+        mlflow.log_param("train_window_end", _iso_ts(df[TIMESTAMP_COL].iloc[-1]))
+        mlflow.log_param("promo_window_start", _iso_ts(promo_df[TIMESTAMP_COL].iloc[0]))
+        mlflow.log_param("promo_window_end", _iso_ts(promo_df[TIMESTAMP_COL].iloc[-1]))
 
         # Artifacts.
         with tempfile.TemporaryDirectory() as tmp:
@@ -342,6 +398,32 @@ def main(argv: list[str] | None = None) -> int:
 
 def _stringify_keys(d: dict) -> dict:
     return {f"fold{k[0]}.{k[1]}.{k[2]}": v for k, v in d.items()}
+
+
+def _iso_ts(ts) -> str:
+    return pd.Timestamp(ts).isoformat().replace("+00:00", "Z")
+
+
+def _load_persistence_promo_rmse(
+    run_id: str, targets: list[str], horizon_labels: list[str]
+) -> dict[tuple[str, str], float]:
+    """Return {(target, horizon_label): rmse} from a persistence run's promo metrics.
+
+    Mirrors `load_per_fold_rmse` but for the promo-window metrics added in T9.
+    Raises if any required cell is missing — promote.py depends on it.
+    """
+    run = mlflow.get_run(run_id)
+    out: dict[tuple[str, str], float] = {}
+    for t in targets:
+        for lbl in horizon_labels:
+            key = f"promo.rmse.{t}.{lbl}"
+            if key not in run.data.metrics:
+                raise RuntimeError(
+                    f"persistence run {run_id} is missing {key!r} — "
+                    "re-run T4 with T9 changes applied"
+                )
+            out[(t, lbl)] = float(run.data.metrics[key])
+    return out
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

@@ -47,7 +47,12 @@ _TRAIN_WRAPPER = (
 _PROMOTION_CMD = (
     "set -euo pipefail; "
     'echo "[init] git_commit=$GIT_COMMIT_OVERRIDE"; '
-    "exec python -m src.promotion.register_staging --git-sha $GIT_COMMIT_OVERRIDE"
+    # promote.py needs data/interim/splits.json for the leakage guardrail.
+    # fetch_features writes it to /app/data/interim/splits.json (the path
+    # params.yaml -> paths.splits_manifest resolves to under /app).
+    "python -m src.common.fetch_features --git-sha $GIT_COMMIT_OVERRIDE; "
+    "exec python -m src.promotion.promote "
+    f"--git-sha $GIT_COMMIT_OVERRIDE --params {PARAMS_PATH}"
 )
 
 _VERIFY_CMD = (
@@ -74,7 +79,14 @@ def _make_training_op(name: str, module: str, image: str) -> Callable:
 
 
 def _make_promotion_op(image: str) -> Callable:
-    """Promotion step: queries MLflow, registers winner as Staging."""
+    """Promotion step (T9): candidate-vs-Production scoring on the promo window.
+
+    Reads promo.mean_skill from each of the three training runs tagged with
+    this pipeline's git_sha, checks the train-window leakage guardrail
+    against splits.json, and transitions the winner to Production (archiving
+    the previous Production version) iff candidate beats Production by at
+    least `params.yaml -> promotion.margin`.
+    """
 
     @dsl.container_component
     def op():

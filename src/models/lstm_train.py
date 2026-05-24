@@ -455,6 +455,90 @@ def main(argv: list[str] | None = None) -> int:
         mean_skill = float(np.mean(list(agg_skill.values())))
         mlflow.log_metric("mean.skill", mean_skill)
 
+        # --- T9: score the last-fold model on the promotion validation window. ---
+        # Reuses `model`, `x_scaler`, `y_mean`, `y_std` left in scope by the
+        # final loop iteration (last fold's training was on the largest train
+        # block, ending strictly before promo_start by Stage 2 construction).
+        persistence_promo_rmse = _load_persistence_promo_rmse(
+            persistence_ref.run_id, targets, horizon_labels
+        )
+        promo_path = repo_root / params["paths"]["features"] / "promo.parquet"
+        LOG.info("loading promo features for promotion-window scoring: %s", promo_path)
+        promo_df = pd.read_parquet(promo_path)
+        promo_df[TIMESTAMP_COL] = pd.to_datetime(promo_df[TIMESTAMP_COL], utc=True)
+        promo_df = promo_df.sort_values(TIMESTAMP_COL).reset_index(drop=True)
+
+        # Stitch the last seq_len-1 rows of train onto promo so the lookback
+        # window for the first promo anchor is filled from real train history.
+        lookback = seq_len - 1
+        stitched = pd.concat([df.tail(lookback), promo_df], axis=0, ignore_index=True)
+        feat_promo = to_float_array(stitched, feature_cols).astype(np.float32)
+        tgt_promo = to_float_array(stitched, targets).astype(np.float32)
+        a_start, a_end = valid_anchor_range(0, len(stitched), seq_len, max(horizons))
+        promo_anchors = np.arange(a_start, a_end)
+        if len(promo_anchors) == 0:
+            raise RuntimeError(
+                f"promo window too short: stitched_len={len(stitched)} "
+                f"seq_len={seq_len} max_h={max(horizons)}"
+            )
+
+        Y_promo_raw = np.empty((len(promo_anchors), n_outputs), dtype=np.float32)
+        col = 0
+        for t_idx in range(tgt_promo.shape[1]):
+            for h in horizons:
+                Y_promo_raw[:, col] = tgt_promo[promo_anchors + h, t_idx].astype(np.float32)
+                col += 1
+
+        promo_ds = SequenceWindowDataset(
+            feat_promo,
+            tgt_promo,
+            promo_anchors,
+            seq_len,
+            horizons,
+            x_mean=x_scaler.mean,
+            x_std=x_scaler.std,
+            y_mean=y_mean,
+            y_std=y_std,
+        )
+        promo_loader = DataLoader(
+            promo_ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=0
+        )
+        model.eval()
+        promo_preds_chunks: list[np.ndarray] = []
+        with torch.no_grad():
+            for xb, _yb in promo_loader:
+                promo_preds_chunks.append(model(xb).cpu().numpy())
+        preds_std = np.concatenate(promo_preds_chunks, axis=0)
+        preds_raw = preds_std * y_std + y_mean
+        diff = preds_raw.astype(np.float64) - Y_promo_raw.astype(np.float64)
+        per_out_rmse = np.sqrt((diff**2).mean(axis=0))
+        per_out_mae = np.abs(diff).mean(axis=0)
+
+        promo_skills: list[float] = []
+        for j, (t, lbl) in enumerate(output_columns):
+            baseline = persistence_promo_rmse[(t, lbl)]
+            p_skill = skill_score(float(per_out_rmse[j]), baseline)
+            mlflow.log_metric(f"promo.rmse.{t}.{lbl}", float(per_out_rmse[j]))
+            mlflow.log_metric(f"promo.mae.{t}.{lbl}", float(per_out_mae[j]))
+            mlflow.log_metric(f"promo.skill.{t}.{lbl}", p_skill)
+            promo_skills.append(p_skill)
+            LOG.info(
+                "  promo  %s %s  RMSE=%.3f  baseline=%.3f  skill=%+.4f",
+                t,
+                lbl,
+                float(per_out_rmse[j]),
+                baseline,
+                p_skill,
+            )
+        promo_mean_skill = float(np.mean(promo_skills))
+        mlflow.log_metric("promo.mean_skill", promo_mean_skill)
+        LOG.info("promo mean_skill across 6 outputs: %+.4f", promo_mean_skill)
+
+        mlflow.log_param("train_window_start", _iso_ts(df[TIMESTAMP_COL].iloc[0]))
+        mlflow.log_param("train_window_end", _iso_ts(df[TIMESTAMP_COL].iloc[-1]))
+        mlflow.log_param("promo_window_start", _iso_ts(promo_df[TIMESTAMP_COL].iloc[0]))
+        mlflow.log_param("promo_window_end", _iso_ts(promo_df[TIMESTAMP_COL].iloc[-1]))
+
         # Artifact upload depends on MinIO + AWS env vars being set. Wrap so a
         # single S3 hiccup doesn't waste all the metric work; reconstruct
         # artifacts later via scripts/finalize_lstm_run.py if needed.
@@ -558,6 +642,32 @@ def main(argv: list[str] | None = None) -> int:
 
 def _stringify_keys(d: dict) -> dict:
     return {f"fold{k[0]}.{k[1]}.{k[2]}": v for k, v in d.items()}
+
+
+def _iso_ts(ts) -> str:
+    return pd.Timestamp(ts).isoformat().replace("+00:00", "Z")
+
+
+def _load_persistence_promo_rmse(
+    run_id: str, targets: list[str], horizon_labels: list[str]
+) -> dict[tuple[str, str], float]:
+    """Return {(target, horizon_label): rmse} from a persistence run's promo metrics.
+
+    Mirrors xgb_train's helper. Promote.py reads these for its own decisions,
+    but the LSTM trainer also needs them to compute its own promo skill scores.
+    """
+    run = mlflow.get_run(run_id)
+    out: dict[tuple[str, str], float] = {}
+    for t in targets:
+        for lbl in horizon_labels:
+            key = f"promo.rmse.{t}.{lbl}"
+            if key not in run.data.metrics:
+                raise RuntimeError(
+                    f"persistence run {run_id} is missing {key!r} — "
+                    "re-run T4 with T9 changes applied"
+                )
+            out[(t, lbl)] = float(run.data.metrics[key])
+    return out
 
 
 def _fold_summary(df: pd.DataFrame, f: Fold) -> dict:

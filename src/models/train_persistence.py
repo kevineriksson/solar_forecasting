@@ -152,6 +152,45 @@ def main(argv: list[str] | None = None) -> int:
             for label in horizon_labels:
                 mlflow.log_metric(f"mean.skill_vs_self.{t}.{label}", 0.0)
 
+        # --- T9: score on promotion validation window. ---
+        # Persistence's own skill on promo is 0 by construction (it IS the
+        # baseline). We still log the raw RMSE/MAE so xgb/lstm runs can read
+        # them as the denominator for their own promo skill scores.
+        promo_path = repo_root / params["paths"]["features"] / "promo.parquet"
+        LOG.info("loading promo features for promotion-window scoring: %s", promo_path)
+        promo_df = pd.read_parquet(promo_path)
+        promo_df[TIMESTAMP_COL] = pd.to_datetime(promo_df[TIMESTAMP_COL], utc=True)
+        promo_df = promo_df.sort_values(TIMESTAMP_COL).reset_index(drop=True)
+
+        # Stitch the last max_h rows of train onto promo so persistence has
+        # history at the boundary. Slice them back off after computing.
+        max_h = max(horizons)
+        stitched = pd.concat([df.tail(max_h), promo_df], axis=0, ignore_index=True)
+        promo_y_pred: dict[tuple[str, str], pd.Series] = {}
+        for t in targets:
+            for h, lbl in zip(horizons, horizon_labels, strict=True):
+                pred_full = persistence_forecast(stitched, t, h, pcfg)
+                pred_slice = pred_full.iloc[max_h:].reset_index(drop=True)
+                scores = score_predictions(promo_df[t], pred_slice)
+                mlflow.log_metric(f"promo.rmse.{t}.{lbl}", scores["rmse"])
+                mlflow.log_metric(f"promo.mae.{t}.{lbl}", scores["mae"])
+                mlflow.log_metric(f"promo.skill.{t}.{lbl}", 0.0)
+                promo_y_pred[(t, lbl)] = pred_slice
+                LOG.info(
+                    "  promo  %s %s  RMSE=%.3f  MAE=%.3f  skill=+0.0000",
+                    t,
+                    lbl,
+                    scores["rmse"],
+                    scores["mae"],
+                )
+        mlflow.log_metric("promo.mean_skill", 0.0)
+
+        # Train window — used by promote.py's leakage guardrail.
+        mlflow.log_param("train_window_start", _iso(df[TIMESTAMP_COL].iloc[0]))
+        mlflow.log_param("train_window_end", _iso(df[TIMESTAMP_COL].iloc[-1]))
+        mlflow.log_param("promo_window_start", _iso(promo_df[TIMESTAMP_COL].iloc[0]))
+        mlflow.log_param("promo_window_end", _iso(promo_df[TIMESTAMP_COL].iloc[-1]))
+
         # Artifacts: fold boundaries + last-fold predictions.
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)

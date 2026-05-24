@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass
 
 import mlflow
+import numpy as np
+import pandas as pd
 from mlflow.tracking import MlflowClient
 
 _FOLD_RMSE_RE = re.compile(r"^fold(?P<fold>\d+)\.rmse\.(?P<target>[a-z_]+)\.(?P<label>[^.]+)$")
@@ -105,3 +107,40 @@ def skill_score(rmse_candidate: float, rmse_baseline: float) -> float:
     if rmse_baseline <= 0.0:
         return float("-inf")
     return 1.0 - (rmse_candidate / rmse_baseline)
+
+
+def rmse(y_true: pd.Series | np.ndarray, y_pred: pd.Series | np.ndarray) -> float:
+    """Root-mean-square error on the overlap of non-NaN rows.
+
+    Same intent as `persistence.score_predictions` but returns just the RMSE
+    scalar — kept here so promote.py and trainers share one definition.
+    """
+    yt = pd.Series(y_true).astype("float64").reset_index(drop=True)
+    yp = pd.Series(y_pred).astype("float64").reset_index(drop=True)
+    mask = yt.notna() & yp.notna()
+    if not mask.any():
+        raise ValueError("no overlapping non-NaN rows between y_true and y_pred")
+    diff = (yp[mask] - yt[mask]).to_numpy(dtype="float64")
+    return float(np.sqrt(np.mean(diff**2)))
+
+
+def mae(y_true: pd.Series | np.ndarray, y_pred: pd.Series | np.ndarray) -> float:
+    """Mean absolute error on the overlap of non-NaN rows."""
+    yt = pd.Series(y_true).astype("float64").reset_index(drop=True)
+    yp = pd.Series(y_pred).astype("float64").reset_index(drop=True)
+    mask = yt.notna() & yp.notna()
+    if not mask.any():
+        raise ValueError("no overlapping non-NaN rows between y_true and y_pred")
+    diff = (yp[mask] - yt[mask]).to_numpy(dtype="float64")
+    return float(np.mean(np.abs(diff)))
+
+
+def mean_skill(per_cell_skill: dict[tuple[str, str], float]) -> float:
+    """Mean of per-(target, horizon) skill scores.
+
+    `params.yaml -> promotion.aggregation = 'mean'` — equal weight across the
+    6 outputs. Centralised here so trainers and promote.py never disagree.
+    """
+    if not per_cell_skill:
+        raise ValueError("per_cell_skill is empty")
+    return float(np.mean(list(per_cell_skill.values())))
