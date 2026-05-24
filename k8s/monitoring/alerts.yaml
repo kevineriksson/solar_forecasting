@@ -1,0 +1,83 @@
+# PrometheusRule for the solar forecasting service (T12).
+#
+# Two alerts, both driven by gauges the replay client publishes:
+#
+#   * SolarDriftHigh       — any tracked input feature's PSI exceeds the
+#                            monitoring.drift.threshold (params.yaml = 3.0)
+#                            sustained for monitoring.drift.sustained_minutes
+#                            (params.yaml = 10).
+#
+#   * SolarSkillScoreLow   — mean rolling skill score across all (target,
+#                            horizon) cells drops below
+#                            monitoring.skill_alert.threshold (params.yaml = 0.0)
+#                            sustained for monitoring.skill_alert.sustained_minutes
+#                            (params.yaml = 10).
+#
+# Both alerts pin themselves to the replay client (drop platform noise) and
+# require the rolling window to be 100% populated, so we never alert on
+# a half-full deque immediately after the replay pod starts. The PSI alert
+# annotation surfaces the offending feature so the on-call rotation can act
+# on it without opening Grafana.
+#
+# Thresholds + sustained windows are intentionally written as literal values
+# in the expr / `for:` fields (PrometheusRule has no templating). Keep these
+# in lockstep with params.yaml -> monitoring.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: solar-forecasting-alerts
+  namespace: monitoring
+  labels:
+    # kube-prometheus-stack's Prometheus selects rules with this label by
+    # default (matches the kps Helm chart's `ruleSelector`).
+    app.kubernetes.io/name: solar-forecasting
+    release: kps
+    prometheus: kps-prometheus
+spec:
+  groups:
+    - name: solar.rules
+      interval: 30s
+      rules:
+        - alert: SolarDriftHigh
+          # max over tracked features; window must be full so PSI isn't NaN.
+          expr: |
+            max(solar_replay_feature_psi) > 3.0
+            and on()
+            min(solar_replay_rolling_window_filled) >= 1
+          for: 10m
+          labels:
+            severity: warning
+            component: solar
+            kind: drift
+          annotations:
+            summary: "Input feature drift detected (PSI > 3.0 for 10m)."
+            description: >-
+              The replay client reports PSI > 3.0 on at least one tracked
+              input feature for ≥ 10 minutes. Worst offender: {{ with query
+              "topk(1, solar_replay_feature_psi)" }}{{ . | first | label
+              "feature" }}{{ end }} (PSI = {{ with query "max(solar_replay_feature_psi)"
+              }}{{ . | first | value | printf "%.3f" }}{{ end }}). Inspect the
+              "Feature drift (PSI)" panel in the Solar Forecasting — Overview
+              dashboard.
+            runbook_url: "https://grafana/d/solar-overview"
+
+        - alert: SolarSkillScoreLow
+          expr: |
+            avg(solar_replay_rolling_skill) < 0
+            and on()
+            min(solar_replay_rolling_window_filled) >= 1
+          for: 10m
+          labels:
+            severity: warning
+            component: solar
+            kind: skill
+          annotations:
+            summary: "Forecast skill score has gone negative (model worse than persistence)."
+            description: >-
+              The average rolling skill score across all (target, horizon)
+              cells has stayed below 0 for ≥ 10 minutes — the deployed model
+              is now worse than naive persistence on the replay window.
+              Inspect the "Rolling skill score vs persistence" panel and
+              consider triggering a retrain via T13.
+            runbook_url: "https://grafana/d/solar-overview"

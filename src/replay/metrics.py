@@ -16,9 +16,20 @@ Series exposed:
   solar_replay_progress_ratio               Gauge
   solar_replay_simulated_clock_seconds      Gauge
   solar_replay_info                         Gauge=1   {model_type,model_version,git_commit,dvc_hash}
+  solar_replay_rolling_mae                  Gauge     {target,horizon}
+  solar_replay_rolling_rmse                 Gauge     {target,horizon}
+  solar_replay_rolling_skill                Gauge     {target,horizon}
+  solar_replay_feature_psi                  Gauge     {feature}
+  solar_replay_rolling_window_filled        Gauge
 
 The histograms share bucketing with the serving app where it makes sense, so
 T12's PromQL queries can use the same boundaries.
+
+The four rolling gauges are computed in the replay client over a fixed-size
+trailing window (``monitoring.drift.window_steps`` in params.yaml) and updated
+after every scored prediction. PSI is computed against a reference histogram
+snapshotted from the training split at client startup. PromQL cannot express
+PSI directly, so the gauge approach is the simplest viable design.
 """
 
 from __future__ import annotations
@@ -117,6 +128,36 @@ info = Gauge(
     labelnames=("model_type", "model_version", "git_commit", "dvc_hash"),
 )
 
+rolling_mae = Gauge(
+    "solar_replay_rolling_mae",
+    "Rolling MAE over the trailing window (W/m^2).",
+    labelnames=("target", "horizon"),
+)
+
+rolling_rmse = Gauge(
+    "solar_replay_rolling_rmse",
+    "Rolling RMSE over the trailing window (W/m^2).",
+    labelnames=("target", "horizon"),
+)
+
+rolling_skill = Gauge(
+    "solar_replay_rolling_skill",
+    "Rolling skill score vs naive persistence: 1 - RMSE_model / RMSE_persistence.",
+    labelnames=("target", "horizon"),
+)
+
+feature_psi = Gauge(
+    "solar_replay_feature_psi",
+    "Population Stability Index of recent feature values vs training reference.",
+    labelnames=("feature",),
+)
+
+rolling_window_filled = Gauge(
+    "solar_replay_rolling_window_filled",
+    "Fraction of the rolling window currently populated, in [0, 1]. "
+    "Skill/PSI gauges are NaN until this reaches 1.0.",
+)
+
 
 def declare_series(
     output_columns: tuple[tuple[str, str], ...],
@@ -136,8 +177,17 @@ def declare_series(
         residual_abs.labels(target=tgt, horizon=lbl)
         prediction.labels(target=tgt, horizon=lbl)
         truth.labels(target=tgt, horizon=lbl)
+        rolling_mae.labels(target=tgt, horizon=lbl)
+        rolling_rmse.labels(target=tgt, horizon=lbl)
+        rolling_skill.labels(target=tgt, horizon=lbl)
     for reason in failure_reasons:
         request_failures_total.labels(reason=reason)
+
+
+def declare_feature_psi_series(features: tuple[str, ...]) -> None:
+    """Pre-touch PSI gauges so the dashboard sees every tracked feature."""
+    for feat in features:
+        feature_psi.labels(feature=feat)
 
 
 def set_info(model_type: str, model_version: str, git_commit: str, dvc_hash: str) -> None:

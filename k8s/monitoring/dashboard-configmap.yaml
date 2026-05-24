@@ -1,0 +1,412 @@
+apiVersion: v1
+data:
+  solar_overview.json: |
+    {
+      "title": "Solar Forecasting — Overview",
+      "uid": "solar-overview",
+      "tags": ["solar", "mlops"],
+      "timezone": "UTC",
+      "schemaVersion": 38,
+      "refresh": "15s",
+      "time": {"from": "now-1h", "to": "now"},
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "label": "Prometheus",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {"text": "Prometheus", "value": "Prometheus"},
+            "hide": 0
+          }
+        ]
+      },
+      "annotations": {"list": []},
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Provenance",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "panels": []
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Production model (serving pod)",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 4, "w": 12, "x": 0, "y": 1},
+          "targets": [
+            {
+              "expr": "solar_model_info",
+              "refId": "A",
+              "legendFormat": "{{model_type}} v{{version}}  git={{git_commit}}  dvc={{dvc_hash}}",
+              "instant": true
+            }
+          ],
+          "options": {
+            "reduceOptions": {"calcs": ["last"], "fields": ""},
+            "textMode": "name",
+            "colorMode": "none",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Replay client",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 4, "w": 12, "x": 12, "y": 1},
+          "targets": [
+            {
+              "expr": "solar_replay_info",
+              "refId": "A",
+              "legendFormat": "{{model_type}} v{{model_version}}  git={{git_commit}}  dvc={{dvc_hash}}",
+              "instant": true
+            }
+          ],
+          "options": {
+            "reduceOptions": {"calcs": ["last"], "fields": ""},
+            "textMode": "name",
+            "colorMode": "none",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 4,
+          "type": "row",
+          "title": "Serving health",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+          "panels": []
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Request rate (per status)",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+          "targets": [
+            {
+              "expr": "sum by (status_code) (rate(solar_predict_requests_total[1m]))",
+              "refId": "A",
+              "legendFormat": "{{status_code}}"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Predict latency (p50 / p95)",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(solar_predict_latency_seconds_bucket{endpoint=\"predict\"}[5m])))",
+              "refId": "A",
+              "legendFormat": "p50"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(solar_predict_latency_seconds_bucket{endpoint=\"predict\"}[5m])))",
+              "refId": "B",
+              "legendFormat": "p95"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+        },
+        {
+          "id": 7,
+          "type": "row",
+          "title": "Replay traffic",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14},
+          "panels": []
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Replay throughput (predictions / s)",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 7, "w": 8, "x": 0, "y": 15},
+          "targets": [
+            {
+              "expr": "sum(rate(solar_replay_predictions_total[1m]))",
+              "refId": "A",
+              "legendFormat": "predictions"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []}
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Replay progress",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 7, "w": 8, "x": 8, "y": 15},
+          "targets": [
+            {
+              "expr": "max(solar_replay_progress_ratio)",
+              "refId": "A",
+              "legendFormat": "progress",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "blue", "value": null},
+                  {"color": "green", "value": 0.99}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["last"]}, "colorMode": "value", "graphMode": "area"}
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Replay failures (per reason)",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 7, "w": 8, "x": 16, "y": 15},
+          "targets": [
+            {
+              "expr": "sum by (reason) (rate(solar_replay_request_failures_total[1m]))",
+              "refId": "A",
+              "legendFormat": "{{reason}}"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []}
+        },
+        {
+          "id": 11,
+          "type": "row",
+          "title": "Skill & error (rolling window)",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 22},
+          "panels": []
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Rolling MAE per (target, horizon)",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 23},
+          "targets": [
+            {
+              "expr": "solar_replay_rolling_mae",
+              "refId": "A",
+              "legendFormat": "{{target}} / {{horizon}}"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "watt"}, "overrides": []}
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "Rolling RMSE per (target, horizon)",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 23},
+          "targets": [
+            {
+              "expr": "solar_replay_rolling_rmse",
+              "refId": "A",
+              "legendFormat": "{{target}} / {{horizon}}"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "watt"}, "overrides": []}
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "Rolling skill score vs persistence",
+          "description": "1 - RMSE_model / RMSE_persistence over the trailing window. Red dashed line is the skill_score_low threshold (0.0).",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 9, "w": 16, "x": 0, "y": 31},
+          "targets": [
+            {
+              "expr": "solar_replay_rolling_skill",
+              "refId": "A",
+              "legendFormat": "{{target}} / {{horizon}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 0.0}
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {"mode": "line"},
+                "drawStyle": "line",
+                "lineWidth": 1
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 15,
+          "type": "stat",
+          "title": "Window fill",
+          "description": "Rolling window must reach 100% before skill / PSI are valid.",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 9, "w": 8, "x": 16, "y": 31},
+          "targets": [
+            {
+              "expr": "solar_replay_rolling_window_filled",
+              "refId": "A",
+              "legendFormat": "filled",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "orange", "value": null},
+                  {"color": "green", "value": 1.0}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["last"]}, "colorMode": "background", "graphMode": "none"}
+        },
+        {
+          "id": 16,
+          "type": "row",
+          "title": "Feature drift (PSI)",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 40},
+          "panels": []
+        },
+        {
+          "id": 17,
+          "type": "timeseries",
+          "title": "Population Stability Index per feature",
+          "description": "PSI of replay feature window vs training reference. Red line is the drift_high threshold (3.0).",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 9, "w": 16, "x": 0, "y": 41},
+          "targets": [
+            {
+              "expr": "solar_replay_feature_psi",
+              "refId": "A",
+              "legendFormat": "{{feature}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "orange", "value": 1.5},
+                  {"color": "red", "value": 3.0}
+                ]
+              },
+              "custom": {
+                "thresholdsStyle": {"mode": "line"},
+                "drawStyle": "line",
+                "lineWidth": 2
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 18,
+          "type": "timeseries",
+          "title": "Live feature value (mean of serving histogram)",
+          "description": "rate-weighted mean from solar_input_feature_value — useful to see WHICH way a feature is drifting.",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 9, "w": 8, "x": 16, "y": 41},
+          "targets": [
+            {
+              "expr": "sum by (feature) (rate(solar_input_feature_value_sum[5m])) / sum by (feature) (rate(solar_input_feature_value_count[5m]))",
+              "refId": "A",
+              "legendFormat": "{{feature}}"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "none"}, "overrides": []}
+        },
+        {
+          "id": 19,
+          "type": "row",
+          "title": "Predictions vs ground truth (15-min horizon)",
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 50},
+          "panels": []
+        },
+        {
+          "id": 20,
+          "type": "heatmap",
+          "title": "GHI predictions over time",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 51},
+          "targets": [
+            {
+              "expr": "sum by (le) (rate(solar_prediction_value_bucket{target=\"ghi\",horizon=\"15min\"}[5m]))",
+              "refId": "A",
+              "format": "heatmap",
+              "legendFormat": "{{le}}"
+            }
+          ],
+          "options": {"yAxis": {"unit": "watt"}, "calculate": false}
+        },
+        {
+          "id": 21,
+          "type": "heatmap",
+          "title": "DNI predictions over time",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 51},
+          "targets": [
+            {
+              "expr": "sum by (le) (rate(solar_prediction_value_bucket{target=\"dni\",horizon=\"15min\"}[5m]))",
+              "refId": "A",
+              "format": "heatmap",
+              "legendFormat": "{{le}}"
+            }
+          ],
+          "options": {"yAxis": {"unit": "watt"}, "calculate": false}
+        },
+        {
+          "id": 22,
+          "type": "heatmap",
+          "title": "DHI predictions over time",
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 51},
+          "targets": [
+            {
+              "expr": "sum by (le) (rate(solar_prediction_value_bucket{target=\"dhi\",horizon=\"15min\"}[5m]))",
+              "refId": "A",
+              "format": "heatmap",
+              "legendFormat": "{{le}}"
+            }
+          ],
+          "options": {"yAxis": {"unit": "watt"}, "calculate": false}
+        }
+      ]
+    }
+kind: ConfigMap
+metadata:
+  labels:
+    grafana_dashboard: "1"
+  name: solar-overview-dashboard
+  namespace: monitoring

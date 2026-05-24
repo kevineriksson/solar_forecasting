@@ -51,11 +51,18 @@ from prometheus_client import start_http_server
 
 from src.replay import metrics as M
 from src.replay.features import ReplaySource, enrich_for_persistence
+from src.replay.rolling import FeaturePSI, RollingResidualWindow
 
 LOG = logging.getLogger("replay.client")
 
 DEFAULT_PARAMS_PATH = "/app/params.yaml"
 DEFAULT_FEATURES_PATH = "/app/data/features/replay.parquet"
+DEFAULT_PSI_REFERENCE_PATH = "/app/data/features/train.parquet"
+
+# Same allowlist the serving app exposes via solar_input_feature_value. Keeping
+# it identical here means the PSI gauge and the serving histogram label sets
+# line up one-to-one on the dashboard.
+PSI_TRACKED_FEATURES: tuple[str, ...] = ("k_t", "ghi_lag1", "zenith")
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +81,8 @@ class RunConfig:
     start: pd.Timestamp | None
     end: pd.Timestamp | None
     request_timeout_s: float
+    psi_reference_path: Path
+    drift_shifts: dict[str, float]
 
 
 def _parse_args(argv: list[str] | None) -> RunConfig:
@@ -105,10 +114,36 @@ def _parse_args(argv: list[str] | None) -> RunConfig:
     p.add_argument(
         "--request-timeout", type=float, default=5.0, help="Per-request HTTP timeout in seconds"
     )
+    p.add_argument(
+        "--psi-reference",
+        default=os.environ.get("SOLAR_PSI_REFERENCE", DEFAULT_PSI_REFERENCE_PATH),
+        help="Path to the training-split parquet used to snapshot the PSI reference distribution",
+    )
+    p.add_argument(
+        "--drift-shift",
+        action="append",
+        default=[],
+        metavar="FEATURE=DELTA",
+        help=(
+            "Synthetic drift: add DELTA to FEATURE on every request before sending. "
+            "Repeatable. Used to verify the drift_high alert end-to-end."
+        ),
+    )
     args = p.parse_args(argv)
 
     if not args.endpoint:
         p.error("--endpoint (or $SERVING_ENDPOINT) is required")
+
+    drift_shifts: dict[str, float] = {}
+    for spec in args.drift_shift:
+        if "=" not in spec:
+            p.error(f"--drift-shift expects FEATURE=DELTA, got {spec!r}")
+        feat, delta = spec.split("=", 1)
+        feat = feat.strip()
+        try:
+            drift_shifts[feat] = float(delta)
+        except ValueError:
+            p.error(f"--drift-shift DELTA must be a float, got {delta!r}")
 
     return RunConfig(
         endpoint=args.endpoint.rstrip("/"),
@@ -120,6 +155,8 @@ def _parse_args(argv: list[str] | None) -> RunConfig:
         start=pd.Timestamp(args.start) if args.start else None,
         end=pd.Timestamp(args.end) if args.end else None,
         request_timeout_s=float(args.request_timeout),
+        psi_reference_path=Path(args.psi_reference),
+        drift_shifts=drift_shifts,
     )
 
 
@@ -173,6 +210,64 @@ def probe_model(session: requests.Session, endpoint: str, timeout_s: float = 30.
 # ---------------------------------------------------------------------------
 
 
+def _apply_drift_shift(
+    features: dict[str, float], drift_shifts: dict[str, float]
+) -> dict[str, float]:
+    """Return a shallow copy of ``features`` with the requested deltas applied.
+
+    Missing features are skipped silently so a misspelt flag doesn't crash the
+    loop mid-run — the lack of PSI movement on the dashboard will surface it.
+    """
+    if not drift_shifts:
+        return features
+    out = dict(features)
+    for feat, delta in drift_shifts.items():
+        if feat in out:
+            try:
+                out[feat] = float(out[feat]) + delta
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _load_psi_reference(path: Path, features: tuple[str, ...]) -> dict[str, list[float]]:
+    """Read the training feature parquet and extract reference samples per feature.
+
+    Returns a mapping with only those features present in the file — callers
+    handle the empty case (no PSI). We pull the column as a numpy array and
+    cast to plain Python floats so the snapshot is decoupled from the DataFrame
+    lifetime.
+    """
+    if not path.exists():
+        LOG.warning("PSI reference parquet not found at %s; PSI gauges disabled", path)
+        return {}
+    LOG.info("loading PSI reference distributions from %s", path)
+    df = pd.read_parquet(path, columns=[f for f in features if f])
+    out: dict[str, list[float]] = {}
+    for feat in features:
+        if feat not in df.columns:
+            LOG.warning("PSI reference parquet missing column %r; skipping", feat)
+            continue
+        out[feat] = [float(v) for v in df[feat].to_numpy() if pd.notna(v)]
+    return out
+
+
+def _update_rolling_gauges(
+    rolling: RollingResidualWindow,
+    output_columns: tuple[tuple[str, str], ...],
+) -> None:
+    for tgt, lbl in output_columns:
+        M.rolling_mae.labels(target=tgt, horizon=lbl).set(rolling.mae(tgt, lbl))
+        M.rolling_rmse.labels(target=tgt, horizon=lbl).set(rolling.rmse(tgt, lbl))
+        M.rolling_skill.labels(target=tgt, horizon=lbl).set(rolling.skill(tgt, lbl))
+    M.rolling_window_filled.set(rolling.fill_ratio())
+
+
+def _update_psi_gauges(psi: FeaturePSI) -> None:
+    for feat in psi.features:
+        M.feature_psi.labels(feature=feat).set(psi.psi(feat))
+
+
 def _build_payload(
     source: ReplaySource,
     t: pd.Timestamp,
@@ -183,15 +278,48 @@ def _build_payload(
     horizon_labels: tuple[str, ...],
 ) -> dict[str, Any]:
     """Construct the JSON body for a /predict request at simulated time ``t``."""
+    return _build_payload_with_overrides(
+        source,
+        t,
+        model_type,
+        sequence_length,
+        site,
+        horizons_steps,
+        horizon_labels,
+        feature_overrides=None,
+    )
+
+
+def _build_payload_with_overrides(
+    source: ReplaySource,
+    t: pd.Timestamp,
+    model_type: str,
+    sequence_length: int,
+    site: dict[str, object],
+    horizons_steps: tuple[int, ...],
+    horizon_labels: tuple[str, ...],
+    feature_overrides: dict[str, float] | None,
+) -> dict[str, Any]:
+    """Like :func:`_build_payload`, but lets the caller substitute the row at ``t``.
+
+    ``feature_overrides``, when set, replaces the t-aligned feature dict —
+    used by ``--drift-shift`` so the model sees the same drifted values that
+    PSI tracking observes. For LSTM the override applies only to the trailing
+    (current) step of the sequence; preceding history stays as-recorded.
+    """
     if model_type == "lstm":
         ts_list = source.feature_timestamps(t, sequence_length)
         feature_seq = source.feature_sequence(t, sequence_length)
+        if feature_overrides is not None and feature_seq:
+            feature_seq[-1] = dict(feature_overrides)
         return {
             "timestamps_utc": [_iso(ts) for ts in ts_list],
             "features": feature_seq,
         }
 
-    feature_row = source.feature_payload(t)
+    feature_row = (
+        dict(feature_overrides) if feature_overrides is not None else source.feature_payload(t)
+    )
     if model_type == "persistence":
         feature_row = enrich_for_persistence(
             feature_row,
@@ -295,8 +423,33 @@ def run(cfg: RunConfig) -> int:
     if metadata.model_type == "lstm" and sequence_length < 1:
         raise RuntimeError("model_type=lstm requires training.lstm.sequence_length_steps >= 1")
 
+    # Rolling-window monitoring config (T12). Falls back gracefully if the
+    # block is missing so older params.yaml files don't break the replay.
+    monitoring_cfg = params.get("monitoring") or {}
+    drift_cfg = monitoring_cfg.get("drift") or {}
+    window_steps = int(drift_cfg.get("window_steps", 96))
+
+    rolling = RollingResidualWindow(
+        window_steps=window_steps,
+        targets=targets,
+        horizon_labels=horizon_labels,
+    )
+
+    psi_reference = _load_psi_reference(cfg.psi_reference_path, PSI_TRACKED_FEATURES)
+    psi = FeaturePSI(
+        reference_values=psi_reference,
+        window_steps=window_steps,
+    )
+    if cfg.drift_shifts:
+        LOG.warning(
+            "SYNTHETIC DRIFT enabled — applying shifts %s to outgoing features. "
+            "Expect the drift_high alert to fire after sustained_minutes.",
+            cfg.drift_shifts,
+        )
+
     # Pre-declare series + provenance gauge, then expose /metrics.
     M.declare_series(output_columns)
+    M.declare_feature_psi_series(psi.features)
     M.set_info(
         metadata.model_type,
         metadata.model_version,
@@ -338,6 +491,10 @@ def run(cfg: RunConfig) -> int:
         targets=targets,
         horizons_steps=horizons_steps,
         horizon_labels=horizon_labels,
+        output_columns=output_columns,
+        rolling=rolling,
+        psi=psi,
+        drift_shifts=cfg.drift_shifts,
     )
 
 
@@ -363,6 +520,10 @@ def _drive_loop(
     targets: tuple[str, ...],
     horizons_steps: tuple[int, ...],
     horizon_labels: tuple[str, ...],
+    output_columns: tuple[tuple[str, str], ...],
+    rolling: RollingResidualWindow,
+    psi: FeaturePSI,
+    drift_shifts: dict[str, float],
 ) -> int:
     predict_url = f"{cfg.endpoint}/predict"
     timeout = cfg.request_timeout_s
@@ -381,7 +542,18 @@ def _drive_loop(
                 time.sleep(next_due - now)
             next_due = max(next_due + interval_s, time.monotonic())
 
-            body = _build_payload(
+            # Read the as-of-t feature row once; reuse for payload + PSI
+            # tracking + naive-persistence baseline so the three views stay
+            # consistent under --drift-shift.
+            raw_features_at_t = source.feature_payload(t)
+            shifted_features_at_t = _apply_drift_shift(raw_features_at_t, drift_shifts)
+
+            # PSI tracks what the model actually sees, including the drift.
+            for feat in psi.features:
+                if feat in shifted_features_at_t:
+                    psi.observe(feat, float(shifted_features_at_t[feat]))
+
+            body = _build_payload_with_overrides(
                 source,
                 t,
                 model_type,
@@ -389,6 +561,7 @@ def _drive_loop(
                 site,
                 horizons_steps,
                 horizon_labels,
+                feature_overrides=shifted_features_at_t if drift_shifts else None,
             )
 
             req_t0 = time.perf_counter()
@@ -417,10 +590,26 @@ def _drive_loop(
                     if key not in data:
                         M.request_failures_total.labels(reason="parse").inc()
                         continue
-                    M.observe_residual(gt.target, label, float(data[key]), gt.value)
+                    pred_value = float(data[key])
+                    M.observe_residual(gt.target, label, pred_value, gt.value)
+                    # Naive persistence baseline: predict y(t+h) = y(t).
+                    # Drift shifts apply to features fed to the model, not to
+                    # the persistence target — so the skill score reflects
+                    # model degradation under drift, not a shifted baseline.
+                    y_at_t = raw_features_at_t.get(gt.target)
+                    if y_at_t is not None:
+                        rolling.observe(
+                            target=gt.target,
+                            horizon_label=label,
+                            model_residual=pred_value - gt.value,
+                            persistence_residual=float(y_at_t) - gt.value,
+                        )
             if not scored_any:
                 no_truth += 1
                 M.request_failures_total.labels(reason="no_truth").inc()
+
+            _update_rolling_gauges(rolling, output_columns)
+            _update_psi_gauges(psi)
 
             sent += 1
             M.simulated_clock_seconds.set(pd.Timestamp(t).timestamp())

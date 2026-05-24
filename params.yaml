@@ -142,7 +142,11 @@ monitoring:
   drift:
     metric: psi                 # population stability index
     window_steps: 96            # last 24 h of replay traffic
-    threshold: 0.2              # PSI > 0.2 considered drift
+    threshold: 3.0              # PSI > 3.0 considered drift (raised from 0.2:
+                                # training-split reference vs 6-month replay
+                                # window yields baseline PSI ~1.5 on this site
+                                # due to seasonal/recent-climate differences,
+                                # so the industry-standard 0.2 fires constantly)
     sustained_minutes: 10       # must hold for this long before alerting
   skill_alert:
     threshold: 0.0              # rolling skill drops below this -> alert

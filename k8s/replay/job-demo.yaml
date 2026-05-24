@@ -37,7 +37,7 @@ spec:
           emptyDir: {}
       initContainers:
         - name: fetch-features
-          image: solar-replay:e18ee37-t11
+          image: solar-replay:90f1ba7-t12
           imagePullPolicy: Never
           command: ["python", "-m", "src.common.fetch_features"]
           env:
@@ -77,7 +77,7 @@ spec:
               memory: "512Mi"
       containers:
         - name: replay
-          image: solar-replay:e18ee37-t11
+          image: solar-replay:90f1ba7-t12
           imagePullPolicy: Never
           command: ["python", "-m", "src.replay.client"]
           args:
