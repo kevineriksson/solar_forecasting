@@ -568,6 +568,56 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)
 
+            # T10: persist the last-fold model so serving can load it.
+            # `model`, `x_scaler`, `y_mean`, `y_std` are left in scope by the
+            # final fold loop and are also what was used for promo scoring,
+            # so what passes promotion is what we serve.
+            model_dir = tmpdir / "model"
+            model_dir.mkdir()
+            torch.save(model.state_dict(), model_dir / "state_dict.pt")
+            arch = {
+                "n_features": len(feature_cols),
+                "hidden_size": hidden_size,
+                "num_layers": num_layers,
+                "dropout": dropout,
+                "n_outputs": n_outputs,
+                "sequence_length_steps": seq_len,
+            }
+            (model_dir / "arch.json").write_text(json.dumps(arch, indent=2) + "\n")
+            (model_dir / "x_scaler.json").write_text(
+                json.dumps(
+                    {"mean": x_scaler.mean.tolist(), "std": x_scaler.std.tolist()},
+                    indent=2,
+                )
+                + "\n"
+            )
+            (model_dir / "y_scaler.json").write_text(
+                json.dumps(
+                    {"mean": y_mean.tolist(), "std": y_std.tolist()},
+                    indent=2,
+                )
+                + "\n"
+            )
+            manifest = {
+                "model_type": "lstm",
+                "feature_columns": feature_cols,
+                "targets": targets,
+                "horizons_steps": horizons,
+                "horizon_labels": horizon_labels,
+                "output_columns": [[t, lbl] for (t, lbl) in output_columns],
+                "n_outputs": n_outputs,
+                "sequence_length_steps": seq_len,
+                "max_horizon_steps": max(horizons),
+            }
+            (model_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+            try:
+                mlflow.log_artifacts(str(model_dir), artifact_path="model")
+            except Exception as exc:  # noqa: BLE001 — same rationale as the diagnostics block below
+                LOG.warning(
+                    "model artifact upload failed (%s); promotion will fail until this is fixed",
+                    exc.__class__.__name__,
+                )
+
             curves_path = tmpdir / "training_curves.json"
             curves_path.write_text(
                 json.dumps({str(k): v for k, v in training_curves.items()}, indent=2) + "\n"

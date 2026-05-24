@@ -195,6 +195,33 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)
 
+            # T10: persist a JSON spec so serving can load persistence as a
+            # uniform model_type. Inference needs the clipping range and the
+            # mapping of target -> clearsky column.
+            model_dir = tmpdir / "model"
+            model_dir.mkdir()
+            # Persistence at serve time needs, per request: the observed target
+            # and its clearsky value at t (to compute k), plus clearsky values
+            # at t+h for each horizon (to project). Replay (T11) will compute
+            # clearsky via pvlib for both timestamps and pass them in.
+            cs_at_t = ["cs_ghi", "cs_dni", "cs_dhi"]
+            cs_at_horizon = [f"cs_{tgt}_h{lbl}" for tgt in targets for lbl in horizon_labels]
+            feature_columns = list(targets) + cs_at_t + cs_at_horizon
+            manifest = {
+                "model_type": "persistence",
+                "feature_columns": feature_columns,
+                "targets": list(targets),
+                "horizons_steps": list(horizons),
+                "horizon_labels": list(horizon_labels),
+                "output_columns": [[t, lbl] for t in targets for lbl in horizon_labels],
+                "n_outputs": len(targets) * len(horizons),
+                "kt_clip_min": pcfg.kt_clip_min,
+                "kt_clip_max": pcfg.kt_clip_max,
+                "target_to_cs_at_t": {"ghi": "cs_ghi", "dni": "cs_dni", "dhi": "cs_dhi"},
+            }
+            (model_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+            mlflow.log_artifacts(str(model_dir), artifact_path="model")
+
             folds_path = tmpdir / "cv_folds.json"
             folds_path.write_text(
                 json.dumps(

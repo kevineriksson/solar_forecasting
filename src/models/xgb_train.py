@@ -326,6 +326,31 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)
 
+            # T10: persist the last-fold models so serving can load them.
+            # The promo-scored model IS the model we serve — promote.py reads
+            # this run's artifacts directly, so the booster files here are
+            # what becomes Production.
+            model_dir = tmpdir / "model"
+            model_dir.mkdir()
+            model_files: dict[str, str] = {}
+            for (t, lbl), mdl in last_fold_models.items():
+                fname = f"xgb_{t}_{lbl}.json"
+                mdl.get_booster().save_model(str(model_dir / fname))
+                model_files[f"{t}.{lbl}"] = fname
+            manifest = {
+                "model_type": "xgboost",
+                "strategy": strategy,
+                "feature_columns": feature_cols,
+                "targets": targets,
+                "horizons_steps": horizons,
+                "horizon_labels": horizon_labels,
+                "output_columns": [[t, lbl] for t in targets for lbl in horizon_labels],
+                "n_outputs": len(targets) * len(horizons),
+                "model_files": model_files,
+            }
+            (model_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+            mlflow.log_artifacts(str(model_dir), artifact_path="model")
+
             fi_path = tmpdir / "feature_importances.json"
             fi_path.write_text(
                 json.dumps(
