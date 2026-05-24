@@ -50,6 +50,14 @@ spec:
             severity: warning
             component: solar
             kind: drift
+            # Required so the AlertmanagerConfig route in k8s/retrain/ matches.
+            # kube-prometheus-stack defaults `alertmanagerConfigMatcherStrategy`
+            # to `OnNamespace`, which auto-injects a `namespace="monitoring"`
+            # matcher onto every sub-route — but Prometheus does NOT auto-add a
+            # namespace label to alerts from PrometheusRule CRs, so we set it
+            # explicitly. Without this, the firing alert reaches Alertmanager
+            # but never matches the retrain webhook route.
+            namespace: monitoring
           annotations:
             summary: "Input feature drift detected (PSI > 3.0 for 10m)."
             description: >-
@@ -72,6 +80,10 @@ spec:
             severity: warning
             component: solar
             kind: skill
+            # Same reason as SolarDriftHigh above — needed for the retrain
+            # AlertmanagerConfig route to match under the default OnNamespace
+            # matcher strategy.
+            namespace: monitoring
           annotations:
             summary: "Forecast skill score has gone negative (model worse than persistence)."
             description: >-

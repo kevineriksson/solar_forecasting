@@ -29,7 +29,7 @@ spec:
         - name: app
           # Tag is pinned to a real built sha at deploy time. Both this image
           # and solar-train:<sha> must already be `minikube image load`-ed.
-          image: solar-retrain:b2ca1a2
+          image: solar-retrain:9d4dc5e
           imagePullPolicy: Never
           ports:
             - name: http
