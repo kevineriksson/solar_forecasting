@@ -1,0 +1,17 @@
+# ClusterIP for Alertmanager + ServiceMonitor to reach the receiver.
+apiVersion: v1
+kind: Service
+metadata:
+  name: solar-retrain
+  namespace: monitoring
+  labels:
+    app: solar-retrain
+spec:
+  type: ClusterIP
+  selector:
+    app: solar-retrain
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

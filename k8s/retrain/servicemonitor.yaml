@@ -1,0 +1,20 @@
+# Scrape /metrics for solar_retrain_* counters and the last-run gauge.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: solar-retrain
+  namespace: monitoring
+  labels:
+    app: solar-retrain
+spec:
+  selector:
+    matchLabels:
+      app: solar-retrain
+  namespaceSelector:
+    matchNames:
+      - monitoring
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

@@ -1,0 +1,52 @@
+# Route the two solar alerts (component=solar) into the retrain webhook.
+#
+# kube-prometheus-stack's Alertmanager picks up AlertmanagerConfig CRs whose
+# namespace + label match its `alertmanagerConfigSelector`. Default for the
+# `kps` release is `matchLabels: {release: kps}` — re-confirm with:
+#
+#   kubectl get alertmanager -n monitoring kps-alertmanager -o yaml \
+#     | yq '.spec.alertmanagerConfigSelector'
+#
+# Adjust the `release` label below if your install uses a different name.
+#
+# The receiver's bearer credential is mounted into Alertmanager via the
+# `solar-retrain-webhook` Secret in this namespace, which it shares with the
+# receiver Deployment (Alertmanager reads `WEBHOOK_TOKEN`, the receiver reads
+# the same key).
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: solar-retrain
+  namespace: monitoring
+  labels:
+    # Selector match for the kps Alertmanager.
+    release: kps
+    app.kubernetes.io/name: solar-forecasting
+spec:
+  route:
+    # Catch-all parent route is owned by kube-prometheus-stack — we only
+    # define a sub-route under it via matchers.
+    receiver: solar-retrain-webhook
+    groupBy: ["alertname"]
+    # Re-emit firing alerts every 15m so a sustained drift can still trip the
+    # debounce *after* the previous cooldown expires.
+    repeatInterval: 15m
+    groupWait: 30s
+    groupInterval: 5m
+    matchers:
+      - name: component
+        value: solar
+      - name: severity
+        value: warning
+    continue: false
+  receivers:
+    - name: solar-retrain-webhook
+      webhookConfigs:
+        - url: http://solar-retrain.monitoring.svc.cluster.local:8000/alert
+          sendResolved: false
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: solar-retrain-webhook
+                key: WEBHOOK_TOKEN

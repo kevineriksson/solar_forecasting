@@ -1,0 +1,68 @@
+# Retrain webhook Deployment (T13). Single replica — in-memory debounce
+# state lives on the pod; restarts reset cooldown (acceptable: the alert's
+# `for: 10m` already filters flapping, and a hot restart is the only way
+# to clear a stuck cooldown if we ever need one).
+#
+# Runs in the `monitoring` ns so the in-cluster Alertmanager can reach it
+# at http://solar-retrain.monitoring.svc.cluster.local:8000/alert.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: solar-retrain
+  namespace: monitoring
+  labels:
+    app: solar-retrain
+spec:
+  replicas: 1
+  strategy:
+    # Recreate (not RollingUpdate) — debounce state shouldn't span pods.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: solar-retrain
+  template:
+    metadata:
+      labels:
+        app: solar-retrain
+    spec:
+      containers:
+        - name: app
+          # Tag is pinned to a real built sha at deploy time. Both this image
+          # and solar-train:<sha> must already be `minikube image load`-ed.
+          image: solar-retrain:b2ca1a2
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: WEBHOOK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: solar-retrain-webhook
+                  key: WEBHOOK_TOKEN
+            # RETRAIN_GIT_SHA / RETRAIN_DVC_HASH come baked into the image
+            # via Dockerfile ARGs at `docker build` time. Override here only
+            # if you need to point a still-loaded image at a different sha.
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 6
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5

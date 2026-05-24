@@ -153,6 +153,21 @@ monitoring:
     sustained_minutes: 10
 
 # ---------------------------------------------------------------------------
+# Retraining trigger (T13)
+# ---------------------------------------------------------------------------
+# Receiver wired to Alertmanager. When SolarDriftHigh or SolarSkillScoreLow
+# fires, the receiver submits a fresh KFP run against the latest `main` SHA.
+# `cooldown_minutes` debounces re-fires so a sustained alert can't fan out
+# into a storm of KFP runs.
+retrain:
+  cooldown_minutes: 30
+  alerts: [SolarDriftHigh, SolarSkillScoreLow]
+  kfp_endpoint: http://ml-pipeline.kubeflow.svc.cluster.local:8888
+  experiment: solar-mlops-retrain
+  image_name: solar-train       # tag is resolved at submit-time from git_sha
+  port: 8000
+
+# ---------------------------------------------------------------------------
 # Storage paths (relative; resolved to MinIO via DVC)
 # ---------------------------------------------------------------------------
 paths:

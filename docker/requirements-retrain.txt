@@ -1,0 +1,12 @@
+# Pinned dependencies for the retrain webhook receiver (T13).
+# Tiny FastAPI app that submits KFP runs in response to Alertmanager webhooks.
+# Inherits its KFP submission code from pipelines/kubeflow/, so kfp itself
+# plus the pipeline.py imports must be satisfied here.
+PyYAML==6.0.2
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.4
+prometheus-client==0.21.1
+# Submission stack — keep in lockstep with what pipelines/kubeflow/submit.py uses.
+kfp==2.10.1
+kfp-kubernetes==1.3.0
