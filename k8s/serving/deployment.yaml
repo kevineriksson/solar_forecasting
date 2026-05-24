@@ -1,0 +1,80 @@
+# Solar forecaster serving Deployment (T10 / Stage 5).
+# Single replica per params.yaml:serving.replicas. Resource caps leave room for
+# KFP, replay, and monitoring on a 6 CPU / 12 GB minikube.
+#
+# Image: built via `docker build -f docker/serve.Dockerfile -t solar-serve:<sha>`
+# then `minikube image load solar-serve:<sha>`. imagePullPolicy=Never enforces
+# local-only resolution.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: solar-serve
+  namespace: solar
+  labels:
+    app: solar-serve
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: solar-serve
+  template:
+    metadata:
+      labels:
+        app: solar-serve
+    spec:
+      containers:
+        - name: app
+          image: solar-serve:7ae9346
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: MLFLOW_TRACKING_URI
+              valueFrom:
+                secretKeyRef:
+                  name: solar-mlops-creds
+                  key: MLFLOW_TRACKING_URI
+            - name: MLFLOW_S3_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: solar-mlops-creds
+                  key: MLFLOW_S3_ENDPOINT_URL
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: solar-mlops-creds
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: solar-mlops-creds
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1500Mi"
+          # Readiness lets traffic in only after the lifespan hook finished
+          # loading the Production model. failureThreshold * periodSeconds
+          # gives ~60s grace for the MLflow download.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 5

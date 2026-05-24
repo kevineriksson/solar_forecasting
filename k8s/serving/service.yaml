@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: solar-serve
+  namespace: solar
+  labels:
+    app: solar-serve
+spec:
+  type: ClusterIP
+  selector:
+    app: solar-serve
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

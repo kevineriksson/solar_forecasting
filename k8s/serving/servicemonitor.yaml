@@ -1,0 +1,22 @@
+# Tells kube-prometheus-stack's Prometheus to scrape /metrics on the serving
+# Service. The platform Prometheus has empty selectors (matches any
+# ServiceMonitor in any namespace), so no extra labels are required here.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: solar-serve
+  namespace: solar
+  labels:
+    app: solar-serve
+spec:
+  selector:
+    matchLabels:
+      app: solar-serve
+  namespaceSelector:
+    matchNames:
+      - solar
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
