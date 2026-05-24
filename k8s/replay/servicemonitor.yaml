@@ -1,0 +1,23 @@
+# Tells the kube-prometheus-stack Prometheus to scrape the replay client's
+# /metrics endpoint (port 9090) on every pod matching the headless Service.
+# The platform Prometheus has empty ServiceMonitorSelectors, so no extra
+# label coordination is required here.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: solar-replay
+  namespace: solar
+  labels:
+    app: solar-replay
+spec:
+  selector:
+    matchLabels:
+      app: solar-replay
+  namespaceSelector:
+    matchNames:
+      - solar
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s

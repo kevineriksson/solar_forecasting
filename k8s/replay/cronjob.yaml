@@ -1,0 +1,113 @@
+# Long-lived simulated traffic source. Suspended by default — flip
+# `suspend: false` (or `kubectl patch ... -p '{"spec":{"suspend":false}}'`)
+# when you want ongoing replay for drift/skill alert dry-runs.
+#
+# Schedule: every 4 hours by default. Each run walks the same 6-month replay
+# window at the same speedup, so concurrent fires would just duplicate the
+# load on the serving pod. `concurrencyPolicy: Forbid` keeps that from
+# happening.
+#
+# Pods carry `app: solar-replay`, so the headless Service + ServiceMonitor in
+# this directory cover both the one-shot demo Job and these CronJob children.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: solar-replay-cron
+  namespace: solar
+  labels:
+    app: solar-replay
+    role: cron
+spec:
+  suspend: true               # opt-in; demo Job is the canonical first run
+  schedule: "0 */4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    metadata:
+      labels:
+        app: solar-replay
+        role: cron
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app: solar-replay
+            role: cron
+        spec:
+          restartPolicy: Never
+          volumes:
+            - name: data
+              emptyDir: {}
+          initContainers:
+            - name: fetch-features
+              image: solar-replay:e18ee37-t11
+              imagePullPolicy: Never
+              command: ["python", "-m", "src.common.fetch_features"]
+              env:
+                - name: GIT_COMMIT_OVERRIDE
+                  value: "fe404bd9d5d3757a7815392453e358318910d1ce"
+                - name: MLFLOW_S3_ENDPOINT_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: solar-mlops-creds
+                      key: MLFLOW_S3_ENDPOINT_URL
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: solar-mlops-creds
+                      key: AWS_ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: solar-mlops-creds
+                      key: AWS_SECRET_ACCESS_KEY
+                - name: AWS_DEFAULT_REGION
+                  value: us-east-1
+              volumeMounts:
+                - name: data
+                  mountPath: /app/data
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+          containers:
+            - name: replay
+              image: solar-replay:e18ee37-t11
+              imagePullPolicy: Never
+              command: ["python", "-m", "src.replay.client"]
+              args:
+                - --endpoint
+                - http://solar-serve.solar.svc.cluster.local:80
+                - --speedup
+                - "500"
+                - --metrics-port
+                - "9090"
+                - --features
+                - /app/data/features/replay.parquet
+                - --params
+                - /app/params.yaml
+                - --request-timeout
+                - "10"
+              ports:
+                - name: metrics
+                  containerPort: 9090
+              env:
+                - name: SOLAR_REPLAY_LINGER_S
+                  value: "45"
+              volumeMounts:
+                - name: data
+                  mountPath: /app/data
+              resources:
+                requests:
+                  cpu: "200m"
+                  memory: "512Mi"
+                limits:
+                  cpu: "1"
+                  memory: "1Gi"

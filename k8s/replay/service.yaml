@@ -1,0 +1,23 @@
+# Headless Service that exposes the replay pods' /metrics endpoint so the
+# kube-prometheus-stack Prometheus can scrape them.
+#
+# Both the demo Job and the (suspended-by-default) CronJob carry the
+# `app: solar-replay` label, so a single Service + ServiceMonitor pair covers
+# both workloads.
+apiVersion: v1
+kind: Service
+metadata:
+  name: solar-replay-metrics
+  namespace: solar
+  labels:
+    app: solar-replay
+spec:
+  type: ClusterIP
+  clusterIP: None  # headless — we want per-pod endpoints, not a load-balanced VIP
+  selector:
+    app: solar-replay
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP

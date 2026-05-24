@@ -9,3 +9,6 @@ python-dateutil==2.9.0.post0
 pvlib==0.11.0
 requests==2.32.3
 prometheus-client==0.21.1
+# boto3 lets the same image run `src.common.fetch_features` as an initContainer
+# step (pulls replay.parquet from MinIO into /app/data/features/).
+boto3==1.35.74
