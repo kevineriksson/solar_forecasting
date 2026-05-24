@@ -119,7 +119,7 @@ build-retrain: $(BUILD_DIR)  ## Build solar-retrain:$(SHA) baking GIT_SHA + DVC_
 	  -t $(RETRAIN_IMAGE):$(SHA) .
 	minikube image load -p $(PROFILE) $(RETRAIN_IMAGE):$(SHA)
 
-# --- features (Stage 1+2 outside KFP, per CLAUDE.md) ----------------------
+# --- features (Stage 1+2 outside KFP, by design) ----------------------
 
 features: $(BUILD_DIR)  ## Run dvc repro then publish features to MinIO under $(GIT_SHA).
 	dvc repro

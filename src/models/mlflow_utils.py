@@ -1,7 +1,7 @@
 """Shared MLflow helpers: tracking URI resolution + reproducibility tags.
 
-CLAUDE.md §1 invariant 3: every MLflow run MUST carry `git_commit` and
-`dvc_hash`. We fail loudly here rather than silently logging an empty tag.
+Project invariant: every MLflow run MUST carry `git_commit` and `dvc_hash`
+tags. We fail loudly here rather than silently logging an empty tag.
 """
 
 from __future__ import annotations

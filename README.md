@@ -63,7 +63,6 @@ make ports   # MLflow:5000, KFP:8080, Grafana:3000, Prometheus:9090, MinIO:9001
 | [scripts/](scripts/) | `00_cluster_up.sh`, `01_install_platform.sh`, `02_publish_features.sh`, `99_teardown.sh`, `build_report.py`, `verify_e2e.sh` |
 | [params.yaml](params.yaml) | Single source of truth for all tunables — paths, lags, thresholds, model hyperparameters |
 | [dvc.yaml](dvc.yaml) | Data versioning stages |
-| [CLAUDE.md](CLAUDE.md) | Architecture + invariants for contributors |
 | [docs/report.md](docs/report.md) | Final report: architecture, results, reproducibility, lessons learned |
 | [docs/demo_script.md](docs/demo_script.md) | Live-presentation walkthrough |
 | [tests/](tests/) | Unit + integration suites (`pytest tests/unit`) |
@@ -96,7 +95,7 @@ make teardown
 
 ## Three invariants
 
-Every deployed model must satisfy these — see [CLAUDE.md §1](CLAUDE.md):
+Every deployed model must satisfy these:
 
 1. **Code in Git** — every change committed before training.
 2. **Data in DVC** — every snapshot and feature table versioned.
@@ -128,7 +127,7 @@ pytest tests/integration   # needs MLflow + MinIO port-forwards
 Hooks: pre-commit runs `ruff`, `black`, and `mypy` on every commit. Install with
 `pre-commit install`. Tests must pass: `pytest tests/unit`.
 
-For architecture decisions and "how to extend this", read [CLAUDE.md](CLAUDE.md).
+For architecture decisions and "how to extend this", read [docs/report.md](docs/report.md).
 
 ## License
 

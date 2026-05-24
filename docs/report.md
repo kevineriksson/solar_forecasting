@@ -124,7 +124,7 @@ make report   # writes build/results.md
 That table is rebuilt from `scripts/build_report.py` which queries MLflow
 directly.
 
-## 4. Reproducibility (CLAUDE.md invariant 3)
+## 4. Reproducibility
 
 Every promoted model carries two tags that pin it to an exact rebuild recipe:
 
@@ -245,7 +245,7 @@ memory budget.
 
 ### 3. DVC ↔ KFP separation is a feature, not a bug — but it's manual
 
-By design (per CLAUDE.md §1), the feature engineering stage (`dvc repro`) runs
+By design, the feature engineering stage (`dvc repro`) runs
 *outside* the KFP DAG and publishes versioned artifacts to MinIO. The KFP
 pipeline then *verifies* features exist at `s3://solar-features/<git_sha>/`
 before training. When `make retrain` was triggered for a SHA that hadn't
@@ -279,14 +279,13 @@ equivalent.
 
 ## 8. Definition of Done
 
-| Criterion (from CLAUDE.md §9) | Status |
+| Criterion | Status |
 |---|---|
 | `git clone` + minikube + `make` targets reproduce the full demo | ✅ — `make cluster-up && make platform && make e2e` |
 | Every model in MLflow `Production` is traceable to a Git commit + DVC hash | ✅ — invariant enforced in [src/models/mlflow_utils.py](../src/models/mlflow_utils.py); demonstrated in §4 |
 | Grafana shows live predictions and residuals from the replay stream | ✅ — `Solar Forecasting — Overview` dashboard, panels populated by `solar_replay_*` series |
 | A simulated drift triggers an alert → KFP run → new candidate → promote/reject | ✅ — webhook trigger end-to-end verified, debounce verified (see Section 6 lesson #1) |
 | README explains how to run it | ✅ — [README.md](../README.md) |
-| CLAUDE.md explains how to extend it | ✅ — committed at project start, stable |
 
 ## 9. Quick reference
 

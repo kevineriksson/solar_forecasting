@@ -42,8 +42,8 @@ Show:
 - The `Production` version.
 - The version tags: `git_commit`, `model_type`, `mean_skill`.
 
-> *"Every promoted model is traceable to an exact Git commit. That's invariant
-> 3 from CLAUDE.md — and it's what makes the rebuild-from-history demo work."*
+> *"Every promoted model is traceable to an exact Git commit. That's one of
+> the project's core invariants — and it's what makes the rebuild-from-history demo work."*
 
 **Click into the source run** → show:
 - Tag `dvc_hash` (the feature artifact fingerprint).

@@ -2,7 +2,7 @@
 
 Replaces the T8 `register_staging.py` placeholder with the real Stage 4 logic.
 
-Decision flow (CLAUDE.md §6 Stage 4):
+Decision flow:
     1. Identify the candidate run: among the three FINISHED training runs
        (persistence, xgboost, lstm) tagged with --git-sha, pick the one with
        the highest `promo.mean_skill` metric. That's the per-pipeline-run

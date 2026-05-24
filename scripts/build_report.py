@@ -101,8 +101,8 @@ def build_table(client: MlflowClient, targets: list[str], horizons: list[str]) -
 def build_tags_table(client: MlflowClient) -> str:
     """Per-model provenance: git_commit + dvc_hash from the latest run of each type.
 
-    Demonstrates CLAUDE.md invariant 3 (every model traceable to commit + hash)
-    in the report itself.
+    Demonstrates the every-model-traceable-to-commit-plus-hash invariant in
+    the report itself.
     """
     runs = _latest_run_per_type(client)
     lines = ["| Model | run_id | git_commit | dvc_hash |", "|---|---|---|---|"]
@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     body = (
         "## Results — latest MLflow run per model_type\n\n"
         f"{metrics_md}\n\n"
-        "### Reproducibility tags (CLAUDE.md invariant 3)\n\n"
+        "### Reproducibility tags\n\n"
         f"{tags_md}\n"
     )
 

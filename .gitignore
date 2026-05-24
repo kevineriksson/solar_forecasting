@@ -8,6 +8,7 @@ mlruns/
 .mypy_cache/
 .ruff_cache/
 PROMPTS.md
+CLAUDE.md
 
 # Rendered manifests and scratch output from `make` (T14).
 build/

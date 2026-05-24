@@ -1,6 +1,6 @@
 """Skill-score helpers.
 
-Skill score on RMSE (the project-wide definition, CLAUDE.md §6 Stage 4):
+Skill score on RMSE (the project-wide definition):
 
     skill = 1 - RMSE_candidate / RMSE_baseline
 
