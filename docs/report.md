@@ -81,39 +81,43 @@ The four-image layout (`solar-train`, `solar-serve`, `solar-replay`, `solar-retr
 Latest MLflow run per model_type at this commit. Skill score is defined as
 `1 − RMSE_model / RMSE_persistence`; positive = better than the baseline.
 
-| Target | Horizon | Metric | persistence | xgb | lstm |
+| Target | Horizon | Metric | persistence | xgboost | lstm |
 |---|---|---|---|---|---|
-| GHI | 15min | MAE   | 16.0 | — | 18.3 |
-| GHI | 15min | RMSE  | 38.2 | — | 38.2 |
-| GHI | 15min | SKILL | —    | — | +0.002 |
-| GHI | 1h    | MAE   | 35.2 | — | 34.2 |
-| GHI | 1h    | RMSE  | 74.5 | — | 68.2 |
-| GHI | 1h    | SKILL | —    | — | +0.086 |
-| DNI | 15min | MAE   | 35.1 | — | 42.5 |
-| DNI | 15min | RMSE  | 83.9 | — | 82.9 |
-| DNI | 15min | SKILL | —    | — | +0.013 |
-| DNI | 1h    | MAE   | 77.1 | — | 81.7 |
-| DNI | 1h    | RMSE  | 161.5 | — | 145.6 |
-| DNI | 1h    | SKILL | —    | — | +0.100 |
-| DHI | 15min | MAE   | 36.4 | — | 17.0 |
-| DHI | 15min | RMSE  | 76.3 | — | 34.1 |
-| DHI | 15min | SKILL | —    | — | +0.550 |
-| DHI | 1h    | MAE   | 39.2 | — | 27.6 |
-| DHI | 1h    | RMSE  | 78.2 | — | 51.1 |
-| DHI | 1h    | SKILL | —    | — | +0.345 |
+| GHI | 15min | MAE   | 16.0  | 15.7  | 18.3 |
+| GHI | 15min | RMSE  | 38.2  | 37.3  | 38.2 |
+| GHI | 15min | SKILL | —     | +0.026 | +0.002 |
+| GHI | 1h    | MAE   | 35.2  | 31.2  | 34.2 |
+| GHI | 1h    | RMSE  | 74.5  | 66.3  | 68.2 |
+| GHI | 1h    | SKILL | —     | +0.111 | +0.086 |
+| DNI | 15min | MAE   | 35.1  | 37.8  | 42.5 |
+| DNI | 15min | RMSE  | 83.9  | 82.0  | 82.9 |
+| DNI | 15min | SKILL | —     | +0.023 | +0.013 |
+| DNI | 1h    | MAE   | 77.1  | 80.5  | 81.7 |
+| DNI | 1h    | RMSE  | 161.5 | 143.6 | 145.6 |
+| DNI | 1h    | SKILL | —     | +0.112 | +0.100 |
+| DHI | 15min | MAE   | 36.4  | 14.8  | 17.0 |
+| DHI | 15min | RMSE  | 76.3  | 32.2  | 34.1 |
+| DHI | 15min | SKILL | —     | +0.575 | +0.550 |
+| DHI | 1h    | MAE   | 39.2  | 26.6  | 27.6 |
+| DHI | 1h    | RMSE  | 78.2  | 50.4  | 51.1 |
+| DHI | 1h    | SKILL | —     | +0.354 | +0.345 |
 
 > Units: MAE and RMSE are W/m². Skill score is unitless. The persistence row has no skill column by construction (skill is computed *against* it).
 
-> The `xgb` column is empty because the XGBoost training pod OOMed during the most recent retrain attempts on a 12 GB minikube while serving + replay + monitoring were also active. The XGB code path is exercised by the unit suite (119/119 tests passing) and ran successfully in earlier full pipeline runs — see Section 6 lesson #2 for context.
+> The latest `xgboost` run shown here was trained at git commit `7ae9346d` (T10) — the two retrain attempts at the current commit OOMed during T13 verification and never logged aggregate metrics. The script filters out `RUNNING`/`FAILED` runs precisely to avoid surfacing those as results. See Section 6 lesson #2 for context.
 
 **Headline takeaways:**
-- Forecasting **DHI** at both horizons is where the LSTM moves the needle:
-  +0.55 / +0.35 skill — persistence is weakest where the diffuse component
-  fluctuates most.
-- **GHI at 15 min** is where persistence is hardest to beat (+0.002): one
-  step ahead, last-observed clear-sky index is already a strong predictor.
-- All cells are net positive — the LSTM is at least as good as persistence
-  everywhere and meaningfully better on the harder cells.
+- **XGBoost beats LSTM on every cell**, and both beat persistence everywhere.
+  The biggest gap to baseline is **DHI** (the diffuse component): +0.58 / +0.35
+  skill at the two horizons. Diffuse irradiance is the most volatile of the
+  three targets, so persistence is weakest there and the engineered features
+  carry the most signal.
+- **GHI at 15 min** is where persistence is hardest to beat: at one step
+  ahead, last-observed clear-sky index is already a strong predictor and the
+  models only buy ~0.5–2.5 % skill on top.
+- The LSTM closes most of the gap to XGBoost on the long-horizon DHI/DNI
+  cells but does not surpass it. The current `Production` registration
+  reflects this — XGBoost is the deployed model.
 
 To regenerate this section from live MLflow:
 
@@ -138,7 +142,7 @@ Latest run per model_type:
 | Model | run_id | git_commit | dvc_hash |
 |---|---|---|---|
 | persistence | `52de5e34` | `9d4dc5ea` | `96364a2e6ea5` |
-| xgb         | —          | —          | —             |
+| xgboost     | `dfd2bebf` | `7ae9346d` | `96364a2e6ea5` |
 | lstm        | `bceb8776` | `9d4dc5ea` | `96364a2e6ea5` |
 
 ### Rebuild demo

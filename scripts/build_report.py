@@ -28,7 +28,10 @@ from mlflow.tracking import MlflowClient
 LOG = logging.getLogger("build_report")
 
 EXPERIMENT_NAME = "solar_forecaster"
-MODEL_TYPES = ["persistence", "xgb", "lstm"]
+# Tag values used at training time, in column-display order. xgb_train.py tags
+# runs as "xgboost", not "xgb" — keep this list in sync with the tag setters
+# in src/models/{train_persistence,xgb_train,lstm_train}.py.
+MODEL_TYPES = ["persistence", "xgboost", "lstm"]
 
 
 def _load_axes(params_path: Path) -> tuple[list[str], list[str]]:
@@ -42,9 +45,12 @@ def _latest_run_per_type(client: MlflowClient) -> dict[str, object]:
         raise SystemExit(f"MLflow experiment {EXPERIMENT_NAME!r} not found. Has the pipeline run?")
     out: dict[str, object] = {}
     for mt in MODEL_TYPES:
+        # Only consider FINISHED runs — RUNNING ones may be OOM/crash victims
+        # that never logged aggregate metrics, and FAILED ones we don't want
+        # to surface as "results."
         runs = client.search_runs(
             experiment_ids=[experiment.experiment_id],
-            filter_string=f"tags.model_type = '{mt}'",
+            filter_string=f"tags.model_type = '{mt}' and attributes.status = 'FINISHED'",
             order_by=["attributes.start_time DESC"],
             max_results=1,
         )
