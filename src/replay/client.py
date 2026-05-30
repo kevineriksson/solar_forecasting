@@ -592,17 +592,23 @@ def _drive_loop(
                         continue
                     pred_value = float(data[key])
                     M.observe_residual(gt.target, label, pred_value, gt.value)
-                    # Naive persistence baseline: predict y(t+h) = y(t).
-                    # Drift shifts apply to features fed to the model, not to
-                    # the persistence target — so the skill score reflects
-                    # model degradation under drift, not a shifted baseline.
+                    # Smart persistence baseline: kₜ × cs_y(t+h), matching the
+                    # baseline used during training. Drift shifts apply to the
+                    # model features only, not to this baseline.
                     y_at_t = raw_features_at_t.get(gt.target)
                     if y_at_t is not None:
+                        cs_at_t = raw_features_at_t.get(f"cs_{gt.target}", 0.0)
+                        cs_at_horizon = gt.clearsky_at_horizon or 0.0
+                        if float(cs_at_t) > 1e-3:
+                            kt = float(y_at_t) / float(cs_at_t)
+                            smart_persistence = kt * float(cs_at_horizon)
+                        else:
+                            smart_persistence = 0.0
                         rolling.observe(
                             target=gt.target,
                             horizon_label=label,
                             model_residual=pred_value - gt.value,
-                            persistence_residual=float(y_at_t) - gt.value,
+                            persistence_residual=smart_persistence - gt.value,
                         )
             if not scored_any:
                 no_truth += 1

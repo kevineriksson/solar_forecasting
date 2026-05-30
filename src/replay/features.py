@@ -91,6 +91,9 @@ def build_features_as_of(
     return _row_to_dict(features.iloc[-1])
 
 
+_TARGET_TO_CS_COL: dict[str, str] = {"ghi": "cs_ghi", "dni": "cs_dni", "dhi": "cs_dhi"}
+
+
 @dataclass(frozen=True)
 class GroundTruth:
     """A single ground-truth observation for a (target, horizon) pair."""
@@ -100,6 +103,7 @@ class GroundTruth:
     horizon_steps: int
     target_timestamp: pd.Timestamp
     value: float
+    clearsky_at_horizon: float | None = None
 
 
 class ReplaySource:
@@ -235,16 +239,25 @@ class ReplaySource:
         future_row = self._df.iloc[future_idx]
         future_ts = pd.Timestamp(future_row[TIMESTAMP_COL])
         label = self._label_for_steps(horizon_steps)
-        return [
-            GroundTruth(
-                target=tgt,
-                horizon_label=label,
-                horizon_steps=int(horizon_steps),
-                target_timestamp=future_ts,
-                value=float(future_row[tgt]),
+        results = []
+        for tgt in self._targets:
+            cs_col = _TARGET_TO_CS_COL.get(tgt)
+            clearsky = (
+                float(future_row[cs_col])
+                if cs_col is not None and cs_col in future_row.index
+                else None
             )
-            for tgt in self._targets
-        ]
+            results.append(
+                GroundTruth(
+                    target=tgt,
+                    horizon_label=label,
+                    horizon_steps=int(horizon_steps),
+                    target_timestamp=future_ts,
+                    value=float(future_row[tgt]),
+                    clearsky_at_horizon=clearsky,
+                )
+            )
+        return results
 
     def _label_for_steps(self, horizon_steps: int) -> str:
         for steps, label in zip(self._horizons_steps, self._horizon_labels, strict=True):

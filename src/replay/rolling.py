@@ -45,8 +45,7 @@ class RollingResidualWindow:
 
     Keeps two parallel deques per cell:
       * ``model`` — residual = prediction - truth from the served model
-      * ``persistence`` — residual from naive persistence (predict ``y(t)``
-        for ``y(t+h)``)
+      * ``persistence`` — residual from smart persistence (kₜ × cs_y(t+h))
 
     Skill score is ``1 - RMSE_model / RMSE_persistence``. Returns ``NaN`` for
     a given cell until both deques are at least ``min_samples`` full; we

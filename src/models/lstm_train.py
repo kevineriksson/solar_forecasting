@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import copy
 import random
 import sys
 import tempfile
@@ -334,6 +335,7 @@ def main(argv: list[str] | None = None) -> int:
             best_train_loss = float("inf")
             best_per_output_rmse = np.zeros(n_outputs, dtype=np.float64)
             best_per_output_mae = np.zeros(n_outputs, dtype=np.float64)
+            best_state_dict: dict | None = None
             epochs_since_improve = 0
             curves: list[dict] = []
 
@@ -407,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
                     best_train_loss = float(train_loss)
                     best_per_output_rmse = per_out_rmse.copy()
                     best_per_output_mae = per_out_mae.copy()
+                    best_state_dict = copy.deepcopy(model.state_dict())
                     epochs_since_improve = 0
                 else:
                     epochs_since_improve += 1
@@ -421,6 +424,11 @@ def main(argv: list[str] | None = None) -> int:
 
             if best_epoch < 0:
                 raise RuntimeError(f"fold {fold.index}: no epoch completed successfully")
+
+            # Restore the best-epoch weights so promo scoring and the saved
+            # artifact reflect the best checkpoint, not the post-early-stop state.
+            if best_state_dict is not None:
+                model.load_state_dict(best_state_dict)
 
             per_fold_best_epoch[fold.index] = best_epoch
             per_fold_train_loss_best[fold.index] = best_train_loss
