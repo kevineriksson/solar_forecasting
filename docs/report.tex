@@ -57,6 +57,8 @@ Accurate short-term solar irradiance forecasting is critical for grid integratio
 
 The forecasting site is Wolf Point, Montana ($48.31^\circ$N, $105.10^\circ$W), a location chosen for its representative mid-latitude climate and the availability of high-quality Solcast historical irradiance data. The system forecasts three irradiance components -- Global Horizontal Irradiance (GHI), Direct Normal Irradiance (DNI), and Diffuse Horizontal Irradiance (DHI) -- at two horizons: 15 minutes (1 time step) and 1 hour (4 time steps), yielding six forecast outputs per inference call.
 
+The full source code, pipeline definitions, and configuration are publicly available at \url{https://github.com/kevineriksson/solar\_forecasting}.
+
 \subsection{Design Principles}
 
 The project is built on three core invariants that every deployed model must satisfy:
@@ -550,6 +552,8 @@ The key lessons -- silent alert dropping in kube-prometheus-stack, memory pressu
 % ── Appendix ──────────────────────────────────────────────────────────────
 \appendix
 \section{Quick Start}
+
+Repository: \url{https://github.com/kevineriksson/solar\_forecasting}
 
 \begin{lstlisting}[language=bash]
 # Bring up the cluster and platform services (~10 min)
