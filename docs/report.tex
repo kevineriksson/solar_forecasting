@@ -505,6 +505,10 @@ Feature engineering (\texttt{dvc repro}) runs outside the KFP DAG by design, pub
 
 The retrain receiver bakes its \texttt{GIT\_SHA} at build time and submits the training pipeline at the same SHA. This guarantees provenance but means that building a new \texttt{solar-retrain:<sha>} image also requires a matching \texttt{solar-train:<sha>} already loaded in minikube. The \texttt{make build} target builds all four images at the same SHA, making the e2e flow hermetic.
 
+\subsection{LSTM Early Stopping Does Not Automatically Restore Best Weights}
+
+PyTorch's training loop does not implicitly roll back to the best checkpoint when early stopping triggers. Without an explicit \texttt{copy.deepcopy} of the model state at each skill improvement, the artifact uploaded to MLflow reflects the \emph{last} training epoch rather than the \emph{best} one. Because early stopping fires after \texttt{patience} epochs without improvement, the saved weights may be several epochs past the model's peak validation skill. The fix is to deepcopy the state dict whenever the best skill improves, then call \texttt{load\_state\_dict} to restore it before promotion scoring and artifact upload.
+
 % ── 10. Limitations & Future Work ──────────────────────────────────────────
 \section{Limitations \& Future Work}
 
@@ -541,7 +545,7 @@ This project demonstrates a complete, reproducible MLOps pipeline for short-term
 
 The XGBoost model achieves the best overall performance, with skill scores of up to +0.58 over the smart persistence baseline on the most challenging target (DHI). Every artifact in the system is traceable to its exact source code (Git commit) and feature input (DVC hash), ensuring full reproducibility. The end-to-end demo runs in under an hour on a local minikube cluster with 12 GB of RAM.
 
-The key lessons -- silent alert dropping in kube-prometheus-stack, memory pressure on constrained clusters, and the deliberate DVC--KFP separation -- highlight the practical challenges of building production-grade MLOps systems and provide guidance for future projects.
+The key lessons -- silent alert dropping in kube-prometheus-stack, memory pressure on constrained clusters, the deliberate DVC--KFP separation, and the need to explicitly checkpoint best-epoch weights in PyTorch early stopping -- highlight the practical challenges of building production-grade MLOps systems and provide guidance for future projects.
 
 % ── Appendix ──────────────────────────────────────────────────────────────
 \appendix
