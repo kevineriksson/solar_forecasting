@@ -35,7 +35,7 @@ REPLAY_IMAGE   := solar-replay
 RETRAIN_IMAGE  := solar-retrain
 
 # In-cluster service endpoints. The Makefile port-forwards these on demand.
-MLFLOW_PORT    ?= 5000
+MLFLOW_PORT    ?= 5001
 KFP_PORT       ?= 8080
 MINIO_PORT     ?= 9000
 SERVE_PORT     ?= 8000
@@ -131,7 +131,7 @@ features: $(BUILD_DIR)  ## Run dvc repro then publish features to MinIO under $(
 
 pipeline: $(BUILD_DIR)  ## Submit the KFP pipeline at HEAD and wait for completion.
 	$(call pf_start,$(KFP_PORT),kubeflow,ml-pipeline-ui,80)
-	$(call pf_start,$(MLFLOW_PORT),mlflow,mlflow,5000)
+	$(call pf_start,$(MLFLOW_PORT),mlflow,mlflow,80)
 	MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT) \
 	python -m pipelines.kubeflow.submit \
 	  --git-sha $(GIT_SHA) \
@@ -223,7 +223,7 @@ e2e: build features pipeline serve monitoring retrain replay trigger-drift verif
 # --- report ---------------------------------------------------------------
 
 report: $(BUILD_DIR)  ## Regenerate docs/report.md results section from live MLflow.
-	$(call pf_start,$(MLFLOW_PORT),mlflow,mlflow,5000)
+	$(call pf_start,$(MLFLOW_PORT),mlflow,mlflow,80)
 	MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT) \
 	  python -m scripts.build_report -o $(BUILD_DIR)/results.md
 	$(call pf_stop,$(MLFLOW_PORT))
@@ -234,7 +234,7 @@ report: $(BUILD_DIR)  ## Regenerate docs/report.md results section from live MLf
 ports:  ## Start all the UI port-forwards (MLflow, KFP, MinIO, Grafana). Foreground; ctrl-C to stop.
 	@echo "Forwarding: MLflow=$(MLFLOW_PORT)  KFP=$(KFP_PORT)  MinIO=$(MINIO_PORT)  Grafana=$(GRAFANA_PORT)  Prom=$(PROM_PORT)"
 	@trap "kill 0" EXIT; \
-	 kubectl port-forward -n mlflow svc/mlflow $(MLFLOW_PORT):5000 & \
+	 kubectl port-forward -n mlflow svc/mlflow $(MLFLOW_PORT):80 & \
 	 kubectl port-forward -n kubeflow svc/ml-pipeline-ui $(KFP_PORT):80 & \
 	 kubectl port-forward -n minio svc/minio-console 9001:9001 & \
 	 kubectl port-forward -n monitoring svc/kps-grafana $(GRAFANA_PORT):80 & \

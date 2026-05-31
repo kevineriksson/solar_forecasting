@@ -55,6 +55,24 @@ def _attach_runtime(task: dsl.PipelineTask, git_sha: str, dvc_hash: str) -> dsl.
     return task
 
 
+def _set_train_resources(
+    task: dsl.PipelineTask,
+    *,
+    mem_request: str,
+    mem_limit: str,
+    cpu_request: str = "500m",
+    cpu_limit: str = "2",
+) -> dsl.PipelineTask:
+    # KFP v2 default container limit is 128Mi — far below what xgboost/LSTM need
+    # to load a 655k-row parquet plus their own working set. Each task sizes
+    # individually so two trainers can run in parallel inside the 12Gi minikube.
+    task.set_memory_request(mem_request)
+    task.set_memory_limit(mem_limit)
+    task.set_cpu_request(cpu_request)
+    task.set_cpu_limit(cpu_limit)
+    return task
+
+
 def build_pipeline(image: str, git_sha: str, dvc_hash: str) -> Callable:
     """Return a compiled-ready @dsl.pipeline function bound to submission state.
 
@@ -78,20 +96,27 @@ def build_pipeline(image: str, git_sha: str, dvc_hash: str) -> Callable:
 
         train_persistence = ops["train_persistence"]().set_display_name("train_persistence")
         _attach_runtime(train_persistence, git_sha, dvc_hash)
+        _set_train_resources(train_persistence, mem_request="1Gi", mem_limit="2Gi")
         train_persistence.after(features)
 
         train_xgb = ops["train_xgb"]().set_display_name("train_xgb")
         _attach_runtime(train_xgb, git_sha, dvc_hash)
+        _set_train_resources(train_xgb, mem_request="1Gi", mem_limit="8Gi")
         # XGB needs the persistence run to exist (it computes skill vs. it).
         train_xgb.after(train_persistence)
 
         train_lstm = ops["train_lstm"]().set_display_name("train_lstm")
         _attach_runtime(train_lstm, git_sha, dvc_hash)
-        # LSTM also needs persistence (same skill-score lookup).
-        train_lstm.after(train_persistence)
+        _set_train_resources(train_lstm, mem_request="2Gi", mem_limit="4Gi")
+        # On the 12Gi minikube, running xgb (needs ~6-8Gi) in parallel with lstm
+        # (needs ~4Gi) plus baseline platform pods (~6Gi) exceeds physical RAM
+        # and the kernel OOM-kills xgb regardless of its cgroup limit.
+        # Serialize: lstm runs only after xgb completes.
+        train_lstm.after(train_xgb)
 
         promotion = ops["promotion"]().set_display_name("promotion")
         _attach_runtime(promotion, git_sha, dvc_hash)
+        _set_train_resources(promotion, mem_request="1Gi", mem_limit="2Gi")
         promotion.after(train_xgb, train_lstm)
 
     return solar_pipeline
